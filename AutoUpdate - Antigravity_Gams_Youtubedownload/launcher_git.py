@@ -16,7 +16,7 @@ except AttributeError:
     pass
 
 # CẤU HÌNH ĐƯỜNG DẪN GIT CẬP NHẬT CỐ ĐỊNH (Sẽ được công cụ upload của Dev tự động cập nhật)
-GIT_REPO_URL = "https://github.com/congtygiaan2022-crypto/Antigravity_Gams_Youtubedownload.git"
+GIT_REPO_URL = "https://github.com/congtygiaan2022-crypto/Gams-YoutubeDownloader.git"
 
 def get_requirements_content():
     if os.path.exists("requirements.txt"):

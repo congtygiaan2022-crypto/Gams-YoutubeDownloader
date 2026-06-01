@@ -79,6 +79,14 @@ def run_clean_push():
         print(f"[OK] Da lien ket remote origin: {remote_url}")
     else:
         print(f"[OK] Da tim thay remote origin: {remote_url}")
+        change = input("-> Ban co muon thay doi URL repository nay khong? (y/N): ").strip().lower()
+        if change == 'y':
+            new_url = input("-> Nhap URL Repository Git moi: ").strip()
+            if new_url:
+                subprocess.run(["git", "remote", "set-url", "origin", new_url], check=True)
+                remote_url = new_url
+                print(f"[OK] Da cap nhat remote origin sang: {remote_url}")
+
 
     # 3. Cấu hình branch mặc định là main
     subprocess.run(["git", "branch", "-M", "main"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
