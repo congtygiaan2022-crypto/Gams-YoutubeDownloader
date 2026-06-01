@@ -1,0 +1,45 @@
+HƯỚNG DẪN CÀI ĐẶT TOOL TRÊN MÁY MỚI
+======================================
+
+Để chạy được tool này trên một máy tính mới, bạn cần cài đặt các phần mềm sau theo thứ tự:
+
+1. CÀI ĐẶT PYTHON
+-----------------
+- Tải Python tại: https://www.python.org/downloads/
+- Khi cài đặt, *BẮT BUỘC* phải tích vào ô: **"Add Python to PATH"** (Thêm Python vào biến môi trường).
+- Nhấn "Install Now".
+
+2. CÀI ĐẶT GEMLOGIN
+-------------------
+- Tải và cài đặt GemLogin.
+- Đăng nhập vào tài khoản GemLogin của bạn.
+- Đảm bảo GemLogin đang mở khi chạy tool.
+
+3. CÀI ĐẶT THƯ VIỆN (DEPENDENCIES)
+----------------------------------
+- Mở thư mục chứa tool này.
+- Nhấp chuột phải vào khoảng trống, chọn "Open Terminal here" hoặc mở CMD và trỏ đến thư mục này.
+- Chạy lệnh sau để cài hết các thư viện cần thiết:
+  
+  pip install -r requirements.txt
+
+  (Lệnh này sẽ tự cài: selenium, requests, yt-dlp, v.v.)
+
+4. CÀI ĐẶT FFMPEG (Quan trọng cho video chất lượng cao)
+------------------------------------------------------
+Tool sử dụng `yt-dlp` để tải video. Để ghép hình ảnh và âm thanh chất lượng cao, bạn nên cài FFmpeg:
+- Tải FFmpeg build sẵn (file .exe) và thêm vào PATH của Windows, hoặc
+- Đơn giản nhất: Đặt file `ffmpeg.exe` vào cùng thư mục với file `main.py` của tool này.
+
+5. CẤU HÌNH TOOL
+----------------
+- File `danhsachkenh.txt`: Nhập link các kênh YouTube Shorts bạn muốn tải.
+- File `proxies.txt` (nếu có dùng proxy).
+- File `config.py`: Có thể chỉnh số luồng tải (DOWNLOAD_THREADS) nếu mạng khỏe.
+
+6. CHẠY TOOL
+------------
+- Nhấp đúp vào `gui.py` hoặc `BangDieuKhien.hta` để mở bảng điều khiển.
+- Nhấn "CHẠY TOOL".
+
+CHÚC BẠN THÀNH CÔNG!

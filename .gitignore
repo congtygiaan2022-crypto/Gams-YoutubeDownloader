@@ -1,0 +1,26 @@
+__pycache__/
+build/
+dist/
+downloads/
+logs/
+*.spec
+*.tmp
+danhsachkenh.txt
+danhsachkenh - backup.txt
+lichsutai.txt
+hangdoi.txt
+thongke_ngay.txt
+kenh_loi.txt
+test_thongke.txt
+active_profiles.tmp
+automation.log
+gams_youtubedownload - Copy.exe
+Release_Package/
+proxies.txt
+.idea/
+.vscode/
+VideoDownloader/
+*.log
+*.zip
+*.rar
+*active_profiles.tmp
