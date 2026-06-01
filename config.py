@@ -1,7 +1,7 @@
 import os
 
 # Cấu hình Browser
-BROWSER_TYPE = "gemlogin" # gemlogin hoặc gpmlogin
+BROWSER_TYPE = "gemlogin"
 GEMLOGIN_API_URL = "http://localhost:1010"
 GPM_LOGIN_API_URL = "http://localhost:60064"
 API_VERSION = "v1"
@@ -33,3 +33,6 @@ DOWNLOAD_PATH = "downloads"
 COOKIES_FROM_BROWSER = None
 COOKIES_FILE = "cookies.txt"
 
+# Cấu hình Profile cụ thể được chọn từ Dashboard
+SELECTED_PROFILE_ID = "2"
+SELECTED_PROFILE_NAME = "Xuan Thang đăng bài"

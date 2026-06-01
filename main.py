@@ -273,7 +273,27 @@ def main():
 
         # Lấy tối đa số luồng check từ config
         max_check_threads = getattr(config, 'CHECK_THREADS', 1)
-        available_profiles = profiles[:max_check_threads]
+        
+        # Kiểm tra xem có sử dụng profile được chỉ định không
+        selected_id = getattr(config, 'SELECTED_PROFILE_ID', 'None')
+        if selected_id and selected_id != 'None':
+            selected_profile = None
+            for p in profiles:
+                p_id = p.get('id') or p.get('uuid') or p.get('profile_id')
+                if str(p_id) == str(selected_id):
+                    selected_profile = p
+                    break
+            
+            if selected_profile:
+                p_name = selected_profile.get('name') or selected_profile.get('title') or selected_profile.get('profile_name') or selected_id
+                logger.info(f"Sử dụng profile được chọn: {p_name} ({selected_id})")
+                available_profiles = [selected_profile]
+            else:
+                logger.warning(f"Không tìm thấy profile được chọn (ID: {selected_id}). Tự động dùng danh sách mặc định.")
+                available_profiles = profiles[:max_check_threads]
+        else:
+            available_profiles = profiles[:max_check_threads]
+
         
         logger.info(f"Cấu hình: {max_check_threads} luồng Scrape, {config.DOWNLOAD_THREADS} luồng Download.")
         logger.info(f"Sử dụng {len(available_profiles)} profile để quét kênh.")

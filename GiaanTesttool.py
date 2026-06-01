@@ -34,6 +34,8 @@ class GiaanTool:
         self.youtube_api_key = tk.StringVar(value=getattr(config, 'YOUTUBE_API_KEY', ''))
         self.cookies_from_browser = tk.StringVar(value=getattr(config, 'COOKIES_FROM_BROWSER', ''))
         self.cookies_file = tk.StringVar(value=getattr(config, 'COOKIES_FILE', 'cookies.txt'))
+        self.selected_profile_id = tk.StringVar(value=getattr(config, 'SELECTED_PROFILE_ID', 'None'))
+        self.selected_profile_name = tk.StringVar(value=getattr(config, 'SELECTED_PROFILE_NAME', 'None'))
         
         # --- Browser Settings ---
         self.browser_type = tk.StringVar(value=getattr(config, 'BROWSER_TYPE', 'gemlogin'))
@@ -58,13 +60,21 @@ class GiaanTool:
         # --- GUI Layout ---
         self.create_header()
         
-        # Main Layout Container (Horizontal split)
-        self.main_container = ttk.Frame(self.root)
-        self.main_container.pack(fill="x", expand=False, padx=10, pady=5)
+        # Create vertical PanedWindow for resizable layout (Drag up/down)
+        self.paned_window = tk.PanedWindow(self.root, orient="vertical", bd=0, bg="#333333", sashwidth=7, sashrelief="flat")
+        self.paned_window.pack(fill="both", expand=True, padx=15, pady=(5, 15))
         
-        # Left Column: Configuration & Mode
+        # Upper pane: Configuration container
+        self.main_container = ttk.Frame(self.paned_window)
+        self.paned_window.add(self.main_container, minsize=450, height=450, stretch="always")
+        
+        # Left Column: Performance & General configurations
         self.left_col = ttk.Frame(self.main_container)
         self.left_col.pack(side="left", fill="both", expand=True, padx=5)
+        
+        # Middle Column: Browser connection & Run Mode
+        self.mid_col = ttk.Frame(self.main_container)
+        self.mid_col.pack(side="left", fill="both", expand=True, padx=5)
         
         # Right Column: Quick Actions & Controls
         self.right_col = ttk.Frame(self.main_container)
@@ -72,11 +82,16 @@ class GiaanTool:
         
         # --- Populate Columns ---
         self.create_settings_frame(self.left_col)
-        self.create_browser_settings_frame(self.left_col)
-        self.create_run_frame(self.left_col)
+        
+        self.create_browser_settings_frame(self.mid_col)
+        self.create_run_frame(self.mid_col)
         
         self.create_quick_actions_frame(self.right_col)
         self.create_control_frame(self.right_col)
+        
+        # Lower pane: Tabs/Log container
+        self.tabs_container = ttk.Frame(self.paned_window)
+        self.paned_window.add(self.tabs_container, minsize=150, height=220, stretch="always")
         
         self.create_tabs_frame()
         
@@ -122,6 +137,12 @@ class GiaanTool:
 
         # 1. Update Root & Frames
         self.root.configure(bg=bg_color)
+        if hasattr(self, 'paned_window'):
+            sash_color = "#333333" if self.is_dark else "#cccccc"
+            self.paned_window.config(bg=sash_color)
+        if hasattr(self, 'paned_window'):
+            sash_color = "#333333" if self.is_dark else "#cccccc"
+            self.paned_window.config(bg=sash_color)
         
         # Update TK widgets manually if needed (Labels that aren't TTK)
         # However, we used TTK for most structural things, but Header/Sub were TTK Label or TK Label?
@@ -262,7 +283,30 @@ class GiaanTool:
         self.ent_api_url.pack(side="left", fill="x", expand=True, padx=5)
         
         btn_check = tk.Button(frame, text="Kiểm tra kết nối Browser API", command=self.check_browser_api, bg="#FF9800", fg="white", relief="flat", font=("Segoe UI", 9))
-        btn_check.pack(fill="x", pady=(5, 0))
+        btn_check.pack(fill="x", pady=(5, 5))
+
+        # Khung chọn Profile
+        f_profile = ttk.Frame(frame)
+        f_profile.pack(fill="x", pady=5)
+        
+        ttk.Label(f_profile, text="Chọn Profile:").pack(side="left")
+        
+        self.cb_profile = ttk.Combobox(f_profile, state="readonly")
+        self.cb_profile.pack(side="left", fill="x", expand=True, padx=5)
+        self.cb_profile.bind("<<ComboboxSelected>>", self.on_profile_selected)
+        
+        self.btn_load_profiles = tk.Button(f_profile, text="Tải Profiles", command=self.load_profiles, bg="#9C27B0", fg="white", relief="flat", font=("Segoe UI", 9))
+        self.btn_load_profiles.pack(side="right")
+        
+        # Thiết lập giá trị Combobox ban đầu
+        saved_id = getattr(config, 'SELECTED_PROFILE_ID', 'None')
+        saved_name = getattr(config, 'SELECTED_PROFILE_NAME', 'None')
+        if saved_id != "None" and saved_name != "None":
+            self.cb_profile['values'] = [f"{saved_name} ({saved_id})", "Mặc định (Dùng luồng)"]
+            self.cb_profile.set(f"{saved_name} ({saved_id})")
+        else:
+            self.cb_profile['values'] = ["Mặc định (Dùng luồng)"]
+            self.cb_profile.set("Mặc định (Dùng luồng)")
         
         self.update_browser_ui()
 
@@ -272,6 +316,13 @@ class GiaanTool:
             self.ent_api_url.config(textvariable=self.gemlogin_api_url)
         else:
             self.ent_api_url.config(textvariable=self.gpmlogin_api_url)
+            
+        # Reset lựa chọn profile khi đổi loại trình duyệt để tránh lỗi
+        if hasattr(self, 'cb_profile'):
+            self.cb_profile['values'] = ["Mặc định (Dùng luồng)"]
+            self.cb_profile.set("Mặc định (Dùng luồng)")
+            self.selected_profile_id.set("None")
+            self.selected_profile_name.set("None")
 
     def check_browser_api(self):
         """Kiểm tra kết nối API của trình duyệt đã chọn."""
@@ -299,21 +350,94 @@ class GiaanTool:
 
         threading.Thread(target=run_check, daemon=True).start()
 
+    def load_profiles(self):
+        """Tải danh sách profiles từ browser API và cập nhật Combobox."""
+        b_type = self.browser_type.get()
+        api_url = self.gemlogin_api_url.get() if b_type == "gemlogin" else self.gpmlogin_api_url.get()
+        
+        def fetch():
+            try:
+                import requests
+                endpoint = "/api/profiles" if b_type == "gemlogin" else "/api/v3/profiles"
+                url = f"{api_url}{endpoint}"
+                self.log(f"Đang tải danh sách profile từ {url}...")
+                
+                response = requests.get(url, timeout=5)
+                if response.status_code == 200:
+                    data = response.json()
+                    profiles = []
+                    if isinstance(data, list):
+                        profiles = data
+                    elif isinstance(data, dict):
+                        profiles = data.get('data', [])
+                    
+                    self.root.after(0, lambda: self.update_profiles_list(profiles))
+                else:
+                    self.root.after(0, lambda: messagebox.showerror("Lỗi", f"Không thể lấy danh sách profile. HTTP {response.status_code}"))
+            except Exception as e:
+                self.root.after(0, lambda: messagebox.showerror("Lỗi", f"Lỗi kết nối khi tải profile: {e}"))
+                self.log(f"Lỗi tải profile: {e}")
+
+        threading.Thread(target=fetch, daemon=True).start()
+
+    def update_profiles_list(self, profiles):
+        options = ["Mặc định (Dùng luồng)"]
+        for p in profiles:
+            p_id = p.get('id') or p.get('uuid') or p.get('profile_id')
+            p_name = p.get('name') or p.get('title') or p.get('profile_name') or p_id
+            options.append(f"{p_name} ({p_id})")
+        
+        self.cb_profile['values'] = options
+        
+        saved_id = self.selected_profile_id.get()
+        found = False
+        if saved_id != "None":
+            for opt in options:
+                if f"({saved_id})" in opt:
+                    self.cb_profile.set(opt)
+                    found = True
+                    break
+        
+        if not found:
+            self.cb_profile.current(0)
+            self.selected_profile_id.set("None")
+            self.selected_profile_name.set("None")
+            
+        self.log(f"Đã tải {len(profiles)} profiles thành công.")
+
+    def on_profile_selected(self, event=None):
+        selected_val = self.cb_profile.get()
+        if selected_val == "Mặc định (Dùng luồng)":
+            self.selected_profile_id.set("None")
+            self.selected_profile_name.set("None")
+            self.log("Đã chọn: Mặc định (Tự động lấy theo số luồng)")
+        else:
+            match = re.search(r'^(.*)\s\(([^()]+)\)$', selected_val)
+            if match:
+                name = match.group(1).strip()
+                p_id = match.group(2).strip()
+                self.selected_profile_id.set(p_id)
+                self.selected_profile_name.set(name)
+                self.log(f"Đã chọn profile: {name} (ID: {p_id})")
+            else:
+                self.selected_profile_id.set("None")
+                self.selected_profile_name.set("None")
+
     def create_quick_actions_frame(self, parent):
         frame = ttk.Labelframe(parent, text="Truy Cập Nhanh", padding=15)
         frame.pack(fill="both", expand=True, padx=5, pady=5)
         
-        btn_channels = tk.Button(frame, text="Mở File Kênh", bg="#607D8B", fg="white", relief="flat", command=lambda: self.open_file("danhsachkenh.txt"))
-        btn_channels.pack(side="left", fill="x", expand=True, padx=(0, 2))
+        btn_channels = tk.Button(frame, text="📁 Mở File Kênh", bg="#607D8B", fg="white", relief="flat", command=lambda: self.open_file("danhsachkenh.txt"), font=("Segoe UI", 9, "bold"))
+        btn_channels.pack(fill="x", pady=4)
         
-        btn_history = tk.Button(frame, text="Mở Log Tải", bg="#607D8B", fg="white", relief="flat", command=lambda: self.open_file("lichsutai.txt"))
-        btn_history.pack(side="left", fill="x", expand=True, padx=2)
+        btn_history = tk.Button(frame, text="📜 Mở Log Tải", bg="#607D8B", fg="white", relief="flat", command=lambda: self.open_file("lichsutai.txt"), font=("Segoe UI", 9, "bold"))
+        btn_history.pack(fill="x", pady=4)
         
-        btn_folder = tk.Button(frame, text="Mở Thư Mục Video", bg="#607D8B", fg="white", relief="flat", command=self.open_download_folder)
-        btn_folder.pack(side="left", fill="x", expand=True, padx=2)
+        btn_folder = tk.Button(frame, text="📂 Mở Thư Mục Video", bg="#607D8B", fg="white", relief="flat", command=self.open_download_folder, font=("Segoe UI", 9, "bold"))
+        btn_folder.pack(fill="x", pady=4)
 
-        btn_view_stats = tk.Button(frame, text="Kiểm tra Video & Log", bg="#4CAF50", fg="white", relief="flat", command=self.show_stats_tab, font=("Segoe UI", 9, "bold"))
-        btn_view_stats.pack(side="left", fill="x", expand=True, padx=(2, 0))
+        btn_view_stats = tk.Button(frame, text="📊 Kiểm tra Video & Log", bg="#4CAF50", fg="white", relief="flat", command=self.show_stats_tab, font=("Segoe UI", 9, "bold"))
+        btn_view_stats.pack(fill="x", pady=4)
 
     def show_stats_tab(self):
         """Chuyển sang tab Thống kê và làm mới dữ liệu."""
@@ -387,8 +511,8 @@ class GiaanTool:
 
     def create_tabs_frame(self):
         # Notebook for Tabs
-        self.notebook = ttk.Notebook(self.root)
-        self.notebook.pack(fill="both", expand=True, padx=20, pady=(0, 20))
+        self.notebook = ttk.Notebook(self.tabs_container)
+        self.notebook.pack(fill="both", expand=True, padx=5, pady=5)
         self.notebook.bind("<<NotebookTabChanged>>", self.on_tab_changed)
 
         # Tab 1: Console Log
@@ -597,6 +721,8 @@ class GiaanTool:
             update_or_add('BROWSER_TYPE', self.browser_type.get(), is_str=True)
             update_or_add('GEMLOGIN_API_URL', self.gemlogin_api_url.get(), is_str=True)
             update_or_add('GPM_LOGIN_API_URL', self.gpmlogin_api_url.get(), is_str=True)
+            update_or_add('SELECTED_PROFILE_ID', self.selected_profile_id.get(), is_str=True)
+            update_or_add('SELECTED_PROFILE_NAME', self.selected_profile_name.get().replace('"', '\\"'), is_str=True)
             
             with open(config_path, "w", encoding="utf-8") as f:
                 f.write(content.strip() + '\n')
