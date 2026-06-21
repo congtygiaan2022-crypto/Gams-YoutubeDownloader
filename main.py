@@ -43,24 +43,76 @@ logger = logging.getLogger(__name__)
 LOCK_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bot_running.lock")
 lock_file_pointer = None
 
+def is_pid_running_bot(pid):
+    """Kiểm tra xem PID có phải là một tiến trình python đang chạy main.py của dự án này không."""
+    try:
+        import psutil
+        if not psutil.pid_exists(pid):
+            return False
+        p = psutil.Process(pid)
+        cmd = p.cmdline()
+        # Kiểm tra nếu tiến trình là python và chạy main.py
+        is_python = 'python' in p.name().lower() or any('python' in arg.lower() for arg in cmd)
+        is_main_py = any('main.py' in arg for arg in cmd)
+        
+        # Kiểm tra thư mục làm việc (cwd) hoặc đường dẫn file main.py để tránh chặn chéo các thư mục khác
+        cwd = p.cwd()
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        is_same_dir = os.path.abspath(cwd) == os.path.abspath(current_dir) or any(current_dir in arg for arg in cmd)
+        
+        return is_python and is_main_py and is_same_dir
+    except:
+        return False
+
 def acquire_lock():
     global lock_file_pointer
-    try:
-        # Nếu lock file đang bị một tiến trình khác mở, việc xóa hoặc ghi đè sẽ lỗi PermissionError
-        if os.path.exists(LOCK_PATH):
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            # Sử dụng os.open với O_CREAT và O_EXCL để đảm bảo tạo file nguyên tử (atomic) ở cấp độ OS
+            fd = os.open(LOCK_PATH, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            lock_file_pointer = os.fdopen(fd, 'w')
+            lock_file_pointer.write(str(os.getpid()))
+            lock_file_pointer.flush()
+            logger.info(f"Đã tạo lock file bot_running.lock cho tiến trình PID {os.getpid()}")
+            return
+        except FileExistsError:
+            # File đã tồn tại, kiểm tra xem lock file có bị cũ (stale) không
+            is_stale = True
+            pid_in_lock = None
             try:
-                os.remove(LOCK_PATH)
-            except OSError:
-                logger.error("LỖI: Một tiến trình bot khác đang chạy (bot_running.lock bị khóa). Tiến trình này sẽ tự động thoát để tránh xung đột trình duyệt.")
+                with open(LOCK_PATH, "r") as f:
+                    pid_str = f.read().strip()
+                    if pid_str.isdigit():
+                        pid_in_lock = int(pid_str)
+                        if pid_in_lock == os.getpid():
+                            # Trùng PID của chính mình (stale lock từ phiên cũ tình cờ trùng PID)
+                            is_stale = True
+                        elif is_pid_running_bot(pid_in_lock):
+                            is_stale = False
+            except Exception:
+                # Không đọc được file (ví dụ bị khóa hoàn toàn bởi tiến trình đang chạy thực tế)
+                # Coi như không stale để bảo đảm an toàn
+                is_stale = False
+            
+            if is_stale:
+                logger.info(f"Phát hiện lock file cũ của tiến trình đã tắt (stale lock, PID trong file: {pid_in_lock}). Tự động dọn dẹp để chạy tiếp.")
+                try:
+                    if os.path.exists(LOCK_PATH):
+                        os.remove(LOCK_PATH)
+                except Exception as e:
+                    logger.warning(f"Không thể xóa lock file cũ: {e}")
+                time.sleep(0.5)
+                continue
+            else:
+                logger.error(f"LỖI: Một tiến trình bot khác đang chạy (bot_running.lock bị khóa bởi PID {pid_in_lock}). Tiến trình này sẽ tự động thoát để tránh xung đột trình duyệt.")
                 sys.exit(1)
-        
-        lock_file_pointer = open(LOCK_PATH, "w")
-        lock_file_pointer.write(str(os.getpid()))
-        lock_file_pointer.flush()
-        logger.info(f"Đã tạo lock file bot_running.lock cho tiến trình PID {os.getpid()}")
-    except Exception as e:
-        logger.error(f"LỖI: Không thể tạo lock file: {e}. Tiến trình sẽ thoát.")
-        sys.exit(1)
+        except Exception as e:
+            logger.error(f"LỖI: Không thể tạo lock file: {e}. Tiến trình sẽ thoát.")
+            sys.exit(1)
+            
+    logger.error("LỖI: Không thể chiếm quyền lock file sau nhiều lần thử lại. Tiến trình sẽ thoát.")
+    sys.exit(1)
 
 def release_lock():
     global lock_file_pointer

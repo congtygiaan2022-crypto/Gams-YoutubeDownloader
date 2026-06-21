@@ -744,6 +744,9 @@ class GiaanTool:
         threading.Thread(target=self.run_logic, daemon=True).start()
 
     def run_logic(self):
+        # Dọn dẹp tiến trình main.py cũ trước khi chạy vòng lặp mới
+        self.clean_orphaned_bot_processes()
+        
         loops = 1 if self.run_once.get() else self.loop_count.get()
         delay = self.loop_delay.get()
         
@@ -822,11 +825,56 @@ class GiaanTool:
                 self.log(f"Lỗi ngắt tiến trình: {e}")
                 
         self.aggressive_cleanup()
+        self.clean_orphaned_bot_processes()
         # UI reset will happen in run_logic when loop breaks
 
     def reset_ui(self):
         self.btn_start.config(state="normal", bg="#4CAF50")
         self.btn_stop.config(state="disabled", bg="#666")
+
+    def clean_orphaned_bot_processes(self):
+        """Tìm và diệt tất cả các tiến trình main.py chạy ngầm trong thư mục của dự án này để tránh xung đột lock."""
+        # 1. Dừng PM2 nếu đang chạy để tránh PM2 tự khởi động lại tạo tiến trình mới tranh chấp lock
+        try:
+            import subprocess
+            subprocess.run("pm2 stop \"Gams Youtube Downloader\"", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            self.log("Đã dừng tiến trình chạy ngầm PM2 'Gams Youtube Downloader' (nếu có).")
+        except Exception:
+            pass
+
+        # 2. Tìm và diệt các tiến trình Python chạy main.py cũ
+        try:
+            import psutil
+            current_pid = os.getpid()
+            killed_count = 0
+            for p in psutil.process_iter(['pid', 'name', 'cmdline', 'cwd']):
+                try:
+                    if p.pid == current_pid:
+                        continue
+                    cmd = p.info.get('cmdline') or []
+                    cwd = p.info.get('cwd') or ""
+                    
+                    is_python = 'python' in p.info.get('name', '').lower() or any('python' in arg.lower() for arg in cmd)
+                    is_main_py = any('main.py' in arg for arg in cmd)
+                    is_same_dir = False
+                    if cwd:
+                        is_same_dir = os.path.abspath(cwd) == os.path.abspath(self.base_dir)
+                    else:
+                        is_same_dir = any(self.base_dir in arg for arg in cmd)
+                        
+                    if is_python and is_main_py and is_same_dir:
+                        if self.current_process and p.pid == self.current_process.pid:
+                            continue
+                            
+                        self.log(f"Phát hiện tiến trình bot cũ đang chạy ngầm (PID {p.pid}). Đang dừng...")
+                        p.kill()
+                        killed_count += 1
+                except:
+                    pass
+            if killed_count > 0:
+                self.log(f"Đã dọn dẹp xong {killed_count} tiến trình bot cũ.")
+        except Exception as e:
+            self.log(f"Lỗi khi dọn dẹp tiến trình: {e}")
 
     def aggressive_cleanup(self):
         """Dừng chỉ các profile GemLogin đã được tool sử dụng."""
