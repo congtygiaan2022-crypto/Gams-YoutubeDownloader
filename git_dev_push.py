@@ -169,10 +169,10 @@ def run_clean_push():
         commit_msg = f"Release-Clean-{now_str}"
         print(f"\n[+] Buoc 4: Tao ban ghi commit: '{commit_msg}'...")
         
-        # Kiểm tra xem có gì thay đổi để commit không
-        status_res = subprocess.run(["git", "status", "--porcelain"], capture_output=True, text=True)
-        if not status_res.stdout.strip():
-            print("[OK] Khong co thay doi nao so voi phien ban truoc tren Git.")
+        # Kiểm tra xem có thay đổi nào được stage để commit không
+        diff_res = subprocess.run(["git", "diff", "--cached", "--quiet"])
+        if diff_res.returncode == 0:
+            print("[OK] Khong co thay doi nao duoc stage de commit so voi phien ban truoc tren Git.")
         else:
             subprocess.run(["git", "commit", "-m", commit_msg], check=True)
             print("[OK] Tao ban ghi commit thanh cong.")
