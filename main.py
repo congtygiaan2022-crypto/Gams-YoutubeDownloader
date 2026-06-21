@@ -39,6 +39,47 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Cơ chế Lock để ngăn chạy song song nhiều tiến trình main.py dùng chung profile
+LOCK_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bot_running.lock")
+lock_file_pointer = None
+
+def acquire_lock():
+    global lock_file_pointer
+    try:
+        # Nếu lock file đang bị một tiến trình khác mở, việc xóa hoặc ghi đè sẽ lỗi PermissionError
+        if os.path.exists(LOCK_PATH):
+            try:
+                os.remove(LOCK_PATH)
+            except OSError:
+                logger.error("LỖI: Một tiến trình bot khác đang chạy (bot_running.lock bị khóa). Tiến trình này sẽ tự động thoát để tránh xung đột trình duyệt.")
+                sys.exit(1)
+        
+        lock_file_pointer = open(LOCK_PATH, "w")
+        lock_file_pointer.write(str(os.getpid()))
+        lock_file_pointer.flush()
+        logger.info(f"Đã tạo lock file bot_running.lock cho tiến trình PID {os.getpid()}")
+    except Exception as e:
+        logger.error(f"LỖI: Không thể tạo lock file: {e}. Tiến trình sẽ thoát.")
+        sys.exit(1)
+
+def release_lock():
+    global lock_file_pointer
+    if lock_file_pointer:
+        try:
+            lock_file_pointer.close()
+        except:
+            pass
+    try:
+        import os
+        if os.path.exists(LOCK_PATH):
+            os.remove(LOCK_PATH)
+    except:
+        pass
+
+import atexit
+acquire_lock()
+atexit.register(release_lock)
+
 import re
 
 def sanitize_filename(name):
@@ -46,23 +87,84 @@ def sanitize_filename(name):
     # Ký tự cấm: < > : " / \ | ? *
     return re.sub(r'[<>:"/\\|?*]', '', name).strip()
 
+def get_channel_identifier(url):
+    """Trích xuất phần định danh độc nhất của kênh từ URL để xác minh điều hướng."""
+    url_lower = url.lower()
+    for pattern in ['/@', '/channel/', '/c/', '/user/']:
+        if pattern in url_lower:
+            try:
+                parts = url.split(pattern)
+                if len(parts) > 1:
+                    identifier = parts[1].split('/')[0].split('?')[0].strip()
+                    if identifier:
+                        return pattern + identifier
+            except:
+                pass
+    return None
+
+def is_channel_name_matching(scraped, expected, url=None):
+    """Kiểm tra xem tên kênh cào được có khớp với tên mong đợi hoặc định danh trong URL không."""
+    if not scraped or not expected or scraped == "unknown_channel":
+        return True
+        
+    def normalize(s):
+        s = s.lower()
+        s = s.replace("short", "").replace("shorts", "")
+        # Chuyển đổi ký tự tiếng Việt có dấu thành không dấu (ASCII)
+        import unicodedata
+        s = unicodedata.normalize('NFKD', s).encode('ASCII', 'ignore').decode('utf-8')
+        return "".join(c for c in s if c.isalnum())
+        
+    s_norm = normalize(scraped)
+    e_norm = normalize(expected)
+    
+    # 1. So khớp trực tiếp với folder name cấu hình
+    if s_norm in e_norm or e_norm in s_norm:
+        return True
+        
+    # 2. So khớp với định danh trong URL (nếu có)
+    if url:
+        identifier = get_channel_identifier(url)
+        if identifier:
+            u_norm = normalize(identifier)
+            if s_norm in u_norm or u_norm in s_norm:
+                return True
+                
+    return False
+
 def scrape_channel(driver, channel_url, max_videos=10):
     """Quét các video shorts mới nhất từ kênh. Trả về (video_links, channel_title)."""
-    # ... (existing code omitted for brevity in replacement, but I will include it to match target)
     try:
         logger.info(f"Đang quét kênh (Browser): {channel_url}")
         driver.get(channel_url)
-        time.sleep(5) # Chờ tải trang
-
-        # Lấy tên kênh
-        channel_title = ""
-        try:
-            # Chiến thuật 1: ytd-channel-name (chuẩn)
-            title_el = driver.find_element(By.CSS_SELECTOR, "#channel-name #text")
-            channel_title = title_el.text.strip()
-        except:
-            pass
         
+        # Chờ tối đa 15 giây để URL của trình duyệt chứa định danh của kênh (tránh tải chậm/đứng ở trang cũ)
+        identifier = get_channel_identifier(channel_url)
+        if identifier:
+            start_nav = time.time()
+            nav_success = False
+            while time.time() - start_nav < 15:
+                if identifier.lower() in driver.current_url.lower():
+                    nav_success = True
+                    break
+                time.sleep(0.5)
+            if not nav_success:
+                logger.warning(f"Cảnh báo: Trình duyệt không chuyển sang URL chứa {identifier} sau 15s. URL hiện tại: {driver.current_url}")
+        
+        # Chờ tối đa 8 giây cho element tên kênh xuất hiện và có text (tránh đọc tên kênh cũ khi trang mới đang load)
+        channel_title = ""
+        start_title = time.time()
+        while time.time() - start_title < 8:
+            try:
+                # Chiến thuật 1: ytd-channel-name (chuẩn)
+                title_el = driver.find_element(By.CSS_SELECTOR, "#channel-name #text")
+                channel_title = title_el.text.strip()
+                if channel_title:
+                    break
+            except:
+                pass
+            time.sleep(0.5)
+
         if not channel_title:
              try:
                  # Chiến thuật 1b: XPATH dự phòng
@@ -387,6 +489,20 @@ def main():
                                          final_name = "unknown_channel_short"
                                 if final_name not in final_names:
                                     final_names.append(final_name)
+
+                            # Kiểm tra sai lệch kênh nếu đã có tên mong đợi
+                            mismatch = False
+                            for fn in final_names:
+                                if fn and not is_channel_name_matching(scraped_title, fn, channel_url):
+                                    logger.error(f"[SAI LỆCH KÊNH] Mong muốn: '{fn}', nhưng cào được: '{scraped_title}' từ URL: {channel_url}. Hủy bỏ quét kênh này để tránh tải nhầm folder!")
+                                    mismatch = True
+                                    break
+                            
+                            if mismatch:
+                                # Bỏ qua lưu video, ghi nhận kết quả lỗi/0 và tiếp tục kênh tiếp theo
+                                for fn in final_names:
+                                    yt_manager.record_check_result(fn, 0)
+                                break
 
                             if videos:
                                 logger.info(f"[{','.join(final_names)}] Tổng cộng tìm thấy {len(videos)} video")
