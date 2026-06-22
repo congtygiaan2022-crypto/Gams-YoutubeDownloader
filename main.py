@@ -582,9 +582,26 @@ def main():
 
                             break 
                         except (WebDriverException, InvalidSessionIdException) as e:
-                            logger.error(f"Lỗi kết nối trình duyệt (mất session): {e}")
-                            # Dừng worker này vì trình duyệt đã chết
-                            return
+                            logger.error(f"Lỗi kết nối trình duyệt (mất session) khi quét {channel_url}: {e}")
+                            logger.info("Đang thử khởi động lại trình duyệt...")
+                            try:
+                                browser_handler.close()
+                            except Exception as ce:
+                                logger.warning(f"Lỗi khi đóng trình kết nối cũ: {ce}")
+                            try:
+                                api.stop_profile(p_id)
+                            except Exception as se:
+                                logger.warning(f"Lỗi khi dừng profile cũ: {se}")
+                            
+                            time.sleep(3)
+                            
+                            driver = start_browser_session(api, browser_handler, p_id)
+                            if driver:
+                                logger.info(f"Khởi động lại trình duyệt thành công cho profile {p_id}. Đang quét lại...")
+                                continue
+                            else:
+                                logger.error("Không thể khởi động lại trình duyệt sau khi mất session. Dừng luồng quét này.")
+                                return
                         except Exception as e:
                             logger.warning(f"Lỗi quét {channel_url} (retry {attempt+1}): {e}")
                             if attempt == max_retries - 1:
