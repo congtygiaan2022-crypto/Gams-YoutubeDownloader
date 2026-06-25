@@ -419,11 +419,15 @@ def main():
     try:
         # 1. Lấy danh sách Profiles
         logger.info("Đang lấy danh sách profiles GemLogin...")
-        profiles = api.get_profiles()
+        try:
+            profiles = api.get_profiles()
+        except Exception as pe:
+            logger.warning(f"Lỗi khi kết nối API lấy danh sách profiles: {pe}")
+            profiles = []
         
         if not profiles:
-            logger.error("Không tìm thấy profile nào. Vui lòng tạo profile trong GemLogin trước.")
-            return
+            logger.warning("Không lấy được profiles nào từ API. Chuyển sang sử dụng trình duyệt Chrome cục bộ dự phòng...")
+            profiles = [{"id": "local", "name": "Chrome Cục Bộ (Dự phòng)"}]
 
         # Lấy tối đa số luồng check từ config
         max_check_threads = getattr(config, 'CHECK_THREADS', 1)
@@ -443,8 +447,12 @@ def main():
                 logger.info(f"Sử dụng profile được chọn: {p_name} ({selected_id})")
                 available_profiles = [selected_profile]
             else:
-                logger.warning(f"Không tìm thấy profile được chọn (ID: {selected_id}). Tự động dùng danh sách mặc định.")
-                available_profiles = profiles[:max_check_threads]
+                if len(profiles) == 1 and profiles[0].get('id') == "local":
+                    logger.info("Sử dụng profile Chrome cục bộ dự phòng.")
+                    available_profiles = profiles
+                else:
+                    logger.warning(f"Không tìm thấy profile được chọn (ID: {selected_id}). Tự động dùng danh sách mặc định.")
+                    available_profiles = profiles[:max_check_threads]
         else:
             available_profiles = profiles[:max_check_threads]
 
@@ -474,9 +482,16 @@ def main():
             # Khởi động browser (Chỉ khi cần)
             driver = None
             if getattr(config, 'USE_BROWSER_SCAN', True):
-                driver = start_browser_session(api, browser_handler, p_id)
+                if p_id == "local":
+                    driver = browser_handler.start_local_browser(headless=getattr(config, 'HEADLESS_LOCAL_CHROME', False))
+                else:
+                    driver = start_browser_session(api, browser_handler, p_id)
+                    if not driver:
+                        logger.warning(f"Không thể khởi động profile {p_id} qua API. Thử khởi động bằng Chrome cục bộ dự phòng...")
+                        driver = browser_handler.start_local_browser(headless=getattr(config, 'HEADLESS_LOCAL_CHROME', False))
+                
                 if not driver:
-                    logger.error(f"Không thể khởi động profile {p_id}")
+                    logger.error(f"Không thể khởi động bất kỳ trình duyệt nào cho profile {p_id}")
                     return
             else:
                 logger.info(f"Đang chạy chế độ API Only. Không khởi động trình duyệt.")
@@ -502,6 +517,7 @@ def main():
                                         logger.warning(f"Phát hiện hết Quota API. Tạm dừng quét API cho luồng này.")
                                     elif v_api == "404":
                                         logger.error(f"[Lỗi 404 API] Kênh {channel_url} không tồn tại.")
+                                        yt_manager.log_failed_channel(channel_url, "Kênh bị xóa/Không tồn tại (404)")
                                     elif v_api:
                                         videos.extend(v_api)
                                         scraped_titles.append(t_api)
@@ -514,6 +530,7 @@ def main():
                                     v_browser, t_browser = scrape_channel(driver, channel_url)
                                     if v_browser == "404":
                                         logger.error(f"[Lỗi 404 Browser] Kênh {channel_url} không tồn tại.")
+                                        yt_manager.log_failed_channel(channel_url, "Kênh bị xóa/Không tồn tại (404)")
                                     elif v_browser:
                                         videos.extend(v_browser)
                                         scraped_titles.append(t_browser)
@@ -534,7 +551,7 @@ def main():
                                 else:
                                      safe_title = sanitize_filename(scraped_title)
                                      if safe_title and safe_title != "unknown_channel":
-                                         final_name = f"{safe_title} short"
+                                         final_name = safe_title
                                          # Lưu lại tên (Chỉ khi chưa có)
                                          yt_manager.update_channel_name(channel_url, final_name)
                                      else:
@@ -542,19 +559,9 @@ def main():
                                 if final_name not in final_names:
                                     final_names.append(final_name)
 
-                            # Kiểm tra sai lệch kênh nếu đã có tên mong đợi
-                            mismatch = False
-                            for fn in final_names:
-                                if fn and not is_channel_name_matching(scraped_title, fn, channel_url):
-                                    logger.error(f"[SAI LỆCH KÊNH] Mong muốn: '{fn}', nhưng cào được: '{scraped_title}' từ URL: {channel_url}. Hủy bỏ quét kênh này để tránh tải nhầm folder!")
-                                    mismatch = True
-                                    break
-                            
-                            if mismatch:
-                                # Bỏ qua lưu video, ghi nhận kết quả lỗi/0 và tiếp tục kênh tiếp theo
-                                for fn in final_names:
-                                    yt_manager.record_check_result(fn, 0)
-                                break
+                            if (scraped_title and scraped_title != "unknown_channel") or videos:
+                                # Kênh hoạt động tốt, xóa khỏi danh sách kênh lỗi nếu có
+                                yt_manager.remove_failed_channel(channel_url)
 
                             if videos:
                                 logger.info(f"[{','.join(final_names)}] Tổng cộng tìm thấy {len(videos)} video")
@@ -588,14 +595,22 @@ def main():
                                 browser_handler.close()
                             except Exception as ce:
                                 logger.warning(f"Lỗi khi đóng trình kết nối cũ: {ce}")
-                            try:
-                                api.stop_profile(p_id)
-                            except Exception as se:
-                                logger.warning(f"Lỗi khi dừng profile cũ: {se}")
+                            if p_id != "local":
+                                try:
+                                    api.stop_profile(p_id)
+                                except Exception as se:
+                                    logger.warning(f"Lỗi khi dừng profile cũ: {se}")
                             
                             time.sleep(3)
                             
-                            driver = start_browser_session(api, browser_handler, p_id)
+                            if p_id == "local":
+                                driver = browser_handler.start_local_browser(headless=getattr(config, 'HEADLESS_LOCAL_CHROME', False))
+                            else:
+                                driver = start_browser_session(api, browser_handler, p_id)
+                                if not driver:
+                                    logger.warning(f"Không thể khởi động lại profile {p_id} qua API. Thử khởi động bằng Chrome cục bộ dự phòng...")
+                                    driver = browser_handler.start_local_browser(headless=getattr(config, 'HEADLESS_LOCAL_CHROME', False))
+                            
                             if driver:
                                 logger.info(f"Khởi động lại trình duyệt thành công cho profile {p_id}. Đang quét lại...")
                                 continue
@@ -606,10 +621,15 @@ def main():
                             logger.warning(f"Lỗi quét {channel_url} (retry {attempt+1}): {e}")
                             if attempt == max_retries - 1:
                                 logger.error(f"Thất bại hoàn toàn khi quét kênh: {channel_url}")
+                                yt_manager.log_failed_channel(channel_url, f"Lỗi quét: {str(e)}")
                             time.sleep(2)
             finally:
                 browser_handler.close()
-                api.stop_profile(p_id)
+                if p_id != "local":
+                    try:
+                        api.stop_profile(p_id)
+                    except Exception as se:
+                        logger.warning(f"Lỗi khi dừng profile cũ: {se}")
 
         # Chia danh sách kênh cho các profile
         def chunkify(lst, n):

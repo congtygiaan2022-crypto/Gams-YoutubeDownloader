@@ -19,7 +19,7 @@ class GiaanTool:
     def __init__(self, root):
         self.root = root
         self.root.title("Antigravity Gams YouTube Download")
-        self.root.geometry("1100x750") # Wider horizontal layout
+        self.root.geometry("1100x800") # Wider horizontal layout
         self.root.configure(bg="#1e1e1e")
         
         # --- Variables ---
@@ -181,13 +181,27 @@ class GiaanTool:
                 self._recursive_theme_update(child, bg, fg, input_bg, btn_bg)
             
             # Apply Colors based on type
-            if wtype in ('Frame', 'Labelframe'):
+            if wtype in ('Frame', 'Labelframe', 'Canvas'):
                 widget.config(bg=bg)
             elif wtype == 'Label':
                 # Skip Header Label if handled manually, but safe to overwrite bg, keep fg if special?
                 # Header Label FG is green, handled separately or we ignore if it has specific color?
-                if widget != self.header_label:
-                     widget.config(bg=bg, fg=fg)
+                if widget == self.header_label:
+                     pass
+                elif widget == getattr(self, 'lbl_autosave', None):
+                     widget.config(bg=bg)
+                else:
+                     # Check if it's one of the status labels in channel_rows
+                     is_status_lbl = False
+                     if hasattr(self, 'channel_rows'):
+                         for row in self.channel_rows:
+                             if row['status_label'] == widget:
+                                 is_status_lbl = True
+                                 break
+                     if is_status_lbl:
+                         widget.config(bg=bg) # Only update background, keep foreground red/green!
+                     else:
+                         widget.config(bg=bg, fg=fg)
             elif wtype in ('Radiobutton', 'Checkbutton'):
                 widget.config(bg=bg, fg=fg, selectcolor=input_bg, activebackground=bg, activeforeground=fg)
             elif wtype == 'Button':
@@ -515,6 +529,11 @@ class GiaanTool:
         self.notebook.pack(fill="both", expand=True, padx=5, pady=5)
         self.notebook.bind("<<NotebookTabChanged>>", self.on_tab_changed)
 
+        # Tab 0: Danh Sách Kênh
+        self.channels_tab = ttk.Frame(self.notebook)
+        self.notebook.add(self.channels_tab, text=" 📋 Danh Sách Kênh ")
+        self.create_channels_tab_ui()
+
         # Tab 1: Console Log
         self.log_tab = ttk.Frame(self.notebook)
         self.notebook.add(self.log_tab, text=" Log Hoạt Động ")
@@ -599,11 +618,17 @@ class GiaanTool:
 
     def on_tab_changed(self, event):
         """Tự động refresh khi người dùng click vào tab."""
-        selected_tab = self.notebook.index(self.notebook.select())
-        if selected_tab == 1:
-            self.refresh_stats()
-        elif selected_tab == 2:
-            self.refresh_error_channels()
+        try:
+            tab_id = self.notebook.select()
+            tab_text = self.notebook.tab(tab_id, "text").strip()
+            if "Thống kê" in tab_text:
+                self.refresh_stats()
+            elif "Kênh Lỗi" in tab_text:
+                self.refresh_error_channels()
+            elif "Danh Sách Kênh" in tab_text:
+                self.refresh_channels_tab()
+        except Exception as e:
+            pass
 
     def refresh_stats(self):
         """Làm mới dữ liệu trong bảng thống kê."""
@@ -831,6 +856,10 @@ class GiaanTool:
     def reset_ui(self):
         self.btn_start.config(state="normal", bg="#4CAF50")
         self.btn_stop.config(state="disabled", bg="#666")
+        self.refresh_stats()
+        self.refresh_error_channels()
+        if hasattr(self, 'refresh_channels_tab'):
+            self.refresh_channels_tab()
 
     def clean_orphaned_bot_processes(self):
         """Tìm và diệt tất cả các tiến trình main.py chạy ngầm trong thư mục của dự án này để tránh xung đột lock."""
@@ -954,6 +983,272 @@ class GiaanTool:
 
         self.log("Đang kiểm tra API Key...")
         threading.Thread(target=run_check, daemon=True).start()
+
+    def create_channels_tab_ui(self):
+        self.channel_rows = []
+        self._save_channels_timer = None
+        
+        # 1. Top bar: Title and Action Buttons
+        top_f = ttk.Frame(self.channels_tab)
+        top_f.pack(fill="x", padx=10, pady=5)
+        
+        lbl_title = ttk.Label(top_f, text="QUẢN LÝ DANH SÁCH KÊNH & FOLDER LƯU TRỮ", font=("Segoe UI", 10, "bold"))
+        lbl_title.pack(side="left")
+        
+        lbl_autosave = tk.Label(top_f, text="● Tự động lưu: Đang bật", fg="#4CAF50", font=("Segoe UI", 9, "italic"))
+        lbl_autosave.pack(side="left", padx=15)
+        self.lbl_autosave = lbl_autosave
+        
+        # Refresh button
+        btn_refresh = tk.Button(top_f, text="↻ Tải lại danh sách", bg="#ff9800", fg="white", relief="flat", font=("Segoe UI", 9, "bold"), command=self.refresh_channels_tab)
+        btn_refresh.pack(side="right", padx=5)
+        
+        # Open txt file button
+        btn_open_txt = tk.Button(top_f, text="📁 Mở File TXT", bg="#607D8B", fg="white", relief="flat", font=("Segoe UI", 9, "bold"), command=lambda: self.open_file("danhsachkenh.txt"))
+        btn_open_txt.pack(side="right", padx=5)
+
+        # Separator line
+        sep = ttk.Separator(self.channels_tab, orient="horizontal")
+        sep.pack(fill="x", padx=10, pady=5)
+
+        # 3. Canvas & Scrollbar container
+        list_container = ttk.Frame(self.channels_tab)
+        list_container.pack(fill="both", expand=True, padx=10, pady=5)
+        
+        self.channels_canvas = tk.Canvas(list_container, borderwidth=0, highlightthickness=0)
+        self.channels_canvas.pack(side="left", fill="both", expand=True)
+        
+        scrollbar = ttk.Scrollbar(list_container, orient="vertical", command=self.channels_canvas.yview)
+        scrollbar.pack(side="right", fill="y")
+        
+        self.scrollable_frame = ttk.Frame(self.channels_canvas)
+        
+        self.scrollable_frame.bind(
+            "<Configure>",
+            lambda e: self.channels_canvas.configure(
+                scrollregion=self.channels_canvas.bbox("all")
+            )
+        )
+        
+        canvas_window = self.channels_canvas.create_window((0, 0), window=self.scrollable_frame, anchor="nw")
+        
+        def configure_canvas_width(event):
+            self.channels_canvas.itemconfig(canvas_window, width=event.width)
+            
+        self.channels_canvas.bind("<Configure>", configure_canvas_width)
+        self.channels_canvas.configure(yscrollcommand=scrollbar.set)
+        
+        # Mousewheel binding
+        def _on_mousewheel(event):
+            self.channels_canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+            
+        def _bind_mw(event):
+            self.channels_canvas.bind_all("<MouseWheel>", _on_mousewheel)
+            
+        def _unbind_mw(event):
+            self.channels_canvas.unbind_all("<MouseWheel>")
+            
+        self.channels_canvas.bind("<Enter>", _bind_mw)
+        self.channels_canvas.bind("<Leave>", _unbind_mw)
+        
+        # Configure columns
+        self.scrollable_frame.columnconfigure(0, weight=0) # STT
+        self.scrollable_frame.columnconfigure(1, weight=3) # URL
+        self.scrollable_frame.columnconfigure(2, weight=2) # Folder
+        self.scrollable_frame.columnconfigure(3, weight=0) # Status
+        self.scrollable_frame.columnconfigure(4, weight=0) # Delete
+        
+        # Add static headers
+        headers = ["STT", "Link Kênh YouTube", "Thư mục lưu video (Folder)", "Trạng thái", "Hành động"]
+        for col_idx, text in enumerate(headers):
+            lbl = ttk.Label(self.scrollable_frame, text=text, font=("Segoe UI", 9, "bold"))
+            lbl.grid(row=0, column=col_idx, padx=5, pady=5)
+            
+        # 4. Bottom frame
+        bottom_f = ttk.Frame(self.channels_tab)
+        bottom_f.pack(fill="x", padx=10, pady=5)
+        
+        btn_add = tk.Button(bottom_f, text="＋ Thêm Kênh Mới", bg="#4CAF50", fg="white", relief="flat", font=("Segoe UI", 9, "bold"), command=self.add_empty_channel_row)
+        btn_add.pack(side="left", padx=5)
+        
+        self.refresh_channels_tab()
+
+    def add_empty_channel_row(self):
+        self.add_channel_row_ui(url="", folder="", statuses=None)
+        self.channels_canvas.update_idletasks()
+        self.channels_canvas.yview_moveto(1.0)
+
+    def refresh_channels_tab(self):
+        if hasattr(self, 'channel_rows') and self.channel_rows:
+            for row in self.channel_rows:
+                row['stt_label'].destroy()
+                row['url_entry'].destroy()
+                row['folder_entry'].destroy()
+                row['status_label'].destroy()
+                row['delete_btn'].destroy()
+            self.channel_rows.clear()
+            
+        from youtube_manager import YouTubeManager
+        yt_manager = YouTubeManager()
+        channels = yt_manager.get_channels()
+        statuses = self.get_channel_statuses()
+        
+        for i, ch in enumerate(channels):
+            folder = ch['names'][0] if ch['names'] else ""
+            if folder is None:
+                folder = ""
+            self.add_channel_row_ui(url=ch['url'], folder=folder, statuses=statuses, row_num=i+1)
+
+    def normalize_url(self, url):
+        if not url:
+            return ""
+        url = url.strip().lower()
+        if url.endswith('/'):
+            url = url[:-1]
+        return url
+
+    def get_channel_statuses(self):
+        statuses = {}
+        try:
+            from youtube_manager import YouTubeManager
+            yt_manager = YouTubeManager()
+            failed = yt_manager.get_failed_channels()
+            for row in failed:
+                if not row or len(row) < 2:
+                    continue
+                url = row[0].strip()
+                reason = row[1].strip()
+                statuses[self.normalize_url(url)] = f"Die ({reason})"
+        except Exception as e:
+            self.log(f"Lỗi đọc trạng thái kênh lỗi: {e}")
+        return statuses
+
+    def add_channel_row_ui(self, url="", folder="", statuses=None, row_num=None):
+        if statuses is None:
+            statuses = self.get_channel_statuses()
+        if row_num is None:
+            row_num = len(self.channel_rows) + 1
+            
+        grid_row = row_num
+        
+        stt_lbl = ttk.Label(self.scrollable_frame, text=str(row_num), font=("Segoe UI", 9))
+        stt_lbl.grid(row=grid_row, column=0, padx=5, pady=5)
+        
+        url_var = tk.StringVar(value=url)
+        url_ent = ttk.Entry(self.scrollable_frame, textvariable=url_var)
+        url_ent.grid(row=grid_row, column=1, padx=5, pady=5, sticky="ew")
+        
+        folder_var = tk.StringVar(value=folder if folder else "")
+        folder_ent = ttk.Entry(self.scrollable_frame, textvariable=folder_var)
+        folder_ent.grid(row=grid_row, column=2, padx=5, pady=5, sticky="ew")
+        
+        norm_url = self.normalize_url(url)
+        status_text = statuses.get(norm_url, "Live")
+        status_fg = "green"
+        if "Die" in status_text:
+            status_fg = "red"
+            
+        status_lbl = tk.Label(self.scrollable_frame, text=status_text, fg=status_fg, font=("Segoe UI", 9, "bold"))
+        status_lbl.grid(row=grid_row, column=3, padx=5, pady=5)
+        
+        bg_color = "#1e1e1e" if self.is_dark else "#f5f5f5"
+        status_lbl.config(bg=bg_color)
+        
+        def on_edit(*args):
+            current_url = url_var.get()
+            current_norm = self.normalize_url(current_url)
+            current_statuses = self.get_channel_statuses()
+            new_status = current_statuses.get(current_norm, "Live")
+            
+            if "Die" in new_status:
+                status_lbl.config(text=new_status, fg="red")
+            else:
+                status_lbl.config(text="Live", fg="green")
+                
+            self.queue_save_channels()
+            
+        url_var.trace_add("write", on_edit)
+        folder_var.trace_add("write", on_edit)
+        
+        delete_btn = tk.Button(
+            self.scrollable_frame, 
+            text="✕", 
+            fg="white", 
+            bg="#f44336", 
+            relief="flat", 
+            font=("Segoe UI", 8, "bold"),
+            command=lambda: self.delete_channel_row(row_num)
+        )
+        delete_btn.grid(row=grid_row, column=4, padx=5, pady=5)
+        
+        row_dict = {
+            'stt': row_num,
+            'stt_label': stt_lbl,
+            'url_var': url_var,
+            'url_entry': url_ent,
+            'folder_var': folder_var,
+            'folder_entry': folder_ent,
+            'status_label': status_lbl,
+            'delete_btn': delete_btn
+        }
+        self.channel_rows.append(row_dict)
+
+    def delete_channel_row(self, row_num):
+        idx_to_remove = -1
+        for idx, row in enumerate(self.channel_rows):
+            if row['stt'] == row_num:
+                idx_to_remove = idx
+                break
+        
+        if idx_to_remove != -1:
+            row = self.channel_rows[idx_to_remove]
+            row['stt_label'].destroy()
+            row['url_entry'].destroy()
+            row['folder_entry'].destroy()
+            row['status_label'].destroy()
+            row['delete_btn'].destroy()
+            
+            self.channel_rows.pop(idx_to_remove)
+            
+            for new_idx, rem_row in enumerate(self.channel_rows):
+                new_row_num = new_idx + 1
+                rem_row['stt'] = new_row_num
+                rem_row['stt_label'].config(text=str(new_row_num))
+                
+                grid_row = new_row_num
+                rem_row['stt_label'].grid(row=grid_row, column=0)
+                rem_row['url_entry'].grid(row=grid_row, column=1)
+                rem_row['folder_entry'].grid(row=grid_row, column=2)
+                rem_row['status_label'].grid(row=grid_row, column=3)
+                rem_row['delete_btn'].grid(row=grid_row, column=4)
+                
+                rem_row['delete_btn'].config(command=lambda r=new_row_num: self.delete_channel_row(r))
+            
+            self.save_channels_to_file()
+
+    def queue_save_channels(self):
+        if hasattr(self, '_save_channels_timer') and self._save_channels_timer:
+            self.root.after_cancel(self._save_channels_timer)
+        self._save_channels_timer = self.root.after(500, self.save_channels_to_file)
+
+    def save_channels_to_file(self):
+        channels = []
+        for row in self.channel_rows:
+            url = row['url_entry'].get().strip()
+            folder = row['folder_entry'].get().strip()
+            if url:
+                channels.append({'url': url, 'name': folder})
+        
+        from youtube_manager import YouTubeManager
+        yt_manager = YouTubeManager()
+        
+        with yt_manager.lock:
+            with open(yt_manager.channels_file, 'w', encoding='utf-8') as f:
+                for ch in channels:
+                    if ch['name']:
+                        f.write(f"{ch['url']}|{ch['name']}\n")
+                    else:
+                        f.write(f"{ch['url']}\n")
 
 if __name__ == "__main__":
     root = tk.Tk()

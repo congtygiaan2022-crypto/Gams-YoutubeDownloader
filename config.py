@@ -36,3 +36,7 @@ COOKIES_FILE = "cookies.txt"
 # Cấu hình Profile cụ thể được chọn từ Dashboard
 SELECTED_PROFILE_ID = "2"
 SELECTED_PROFILE_NAME = "Xuan Thang đăng bài"
+
+# Cấu hình dự phòng Chrome cục bộ
+HEADLESS_LOCAL_CHROME = False  # Chạy hiển thị cửa sổ để dễ theo dõi
+

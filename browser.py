@@ -54,6 +54,36 @@ class Browser:
             # Không raise, trả về None để main xử lý retry
             return None
 
+    def start_local_browser(self, headless=True):
+        """Khởi động trình duyệt Chrome cục bộ (Dự phòng)."""
+        try:
+            self.logger.info("Đang khởi động trình duyệt Chrome cục bộ (Dự phòng)...")
+            options = Options()
+            if headless:
+                options.add_argument("--headless=new")
+                self.logger.info("Trình duyệt chạy ẩn danh (headless)")
+            else:
+                self.logger.info("Trình duyệt chạy hiển thị cửa sổ (headed)")
+            
+            options.add_argument("--disable-gpu")
+            options.add_argument("--no-sandbox")
+            options.add_argument("--disable-dev-shm-usage")
+            options.add_argument("--window-size=1280,800")
+            
+            # Tránh phát hiện bot
+            options.add_argument("--disable-blink-features=AutomationControlled")
+            options.add_experimental_option("excludeSwitches", ["enable-automation"])
+            options.add_experimental_option("useAutomationExtension", False)
+            
+            self.logger.info("Đang khởi tạo Chrome WebDriver...")
+            self.driver = webdriver.Chrome(options=options)
+            self.driver.set_page_load_timeout(30)
+            self.logger.info("Khởi động Chrome cục bộ thành công.")
+            return self.driver
+        except Exception as e:
+            self.logger.error(f"Lỗi khởi động Chrome cục bộ: {e}")
+            return None
+
     def close(self):
         if self.driver:
             # Chúng ta giải phóng tài nguyên driver.

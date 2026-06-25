@@ -370,6 +370,26 @@ class YouTubeManager:
                     f.write(f"{url}|{reason}|{now}\n")
                 self.logger.warning(f"Đã log kênh lỗi: {url} - Lý do: {reason}")
 
+    def remove_failed_channel(self, url):
+        """Xóa kênh khỏi danh sách lỗi (khi hoạt động trở lại)."""
+        with self.lock:
+            if not os.path.exists(self.loi_channels_file):
+                return
+            lines = []
+            updated = False
+            with open(self.loi_channels_file, 'r', encoding='utf-8') as f:
+                for line in f:
+                    parts = line.strip().split('|')
+                    if parts and parts[0].strip() == url.strip():
+                        updated = True
+                        continue
+                    lines.append(line)
+            if updated:
+                with open(self.loi_channels_file, 'w', encoding='utf-8') as f:
+                    f.writelines(lines)
+                self.logger.info(f"Đã xóa kênh khỏi danh sách lỗi: {url}")
+
+
     def get_failed_channels(self):
         """Lấy danh sách kênh lỗi."""
         data = []
