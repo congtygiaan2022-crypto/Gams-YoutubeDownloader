@@ -1390,17 +1390,24 @@ class GiaanTool:
         status_lbl.config(bg=bg_color)
         
         def on_edit(*args):
-            current_url = url_var.get()
-            current_norm = self.normalize_url(current_url)
-            current_statuses = self.get_channel_statuses()
-            new_status = current_statuses.get(current_norm, "Live")
-            
-            if "Die" in new_status:
-                status_lbl.config(text=new_status, fg="red")
-            else:
-                status_lbl.config(text="Live", fg="green")
+            try:
+                current_url = url_var.get()
+                current_norm = self.normalize_url(current_url)
+                current_statuses = self.get_channel_statuses()
+                new_status = current_statuses.get(current_norm, "Live")
                 
-            self.queue_save_channels()
+                if status_lbl.winfo_exists():
+                    if "Die" in new_status:
+                        status_lbl.config(text=new_status, fg="red")
+                    else:
+                        status_lbl.config(text="Live", fg="green")
+            except Exception:
+                pass
+                
+            try:
+                self.queue_save_channels()
+            except Exception:
+                pass
             
         url_var.trace_add("write", on_edit)
         folder_var.trace_add("write", on_edit)
@@ -1412,7 +1419,7 @@ class GiaanTool:
             bg="#f44336", 
             relief="flat", 
             font=("Segoe UI", 8, "bold"),
-            command=lambda: self.delete_channel_row(row_num)
+            command=lambda r=row_num: self.delete_channel_row(r)
         )
         delete_btn.grid(row=grid_row, column=4, padx=5, pady=5)
         
@@ -1429,61 +1436,100 @@ class GiaanTool:
         self.channel_rows.append(row_dict)
 
     def delete_channel_row(self, row_num):
-        idx_to_remove = -1
-        for idx, row in enumerate(self.channel_rows):
-            if row['stt'] == row_num:
-                idx_to_remove = idx
-                break
-        
-        if idx_to_remove != -1:
-            row = self.channel_rows[idx_to_remove]
-            row['stt_label'].destroy()
-            row['url_entry'].destroy()
-            row['folder_entry'].destroy()
-            row['status_label'].destroy()
-            row['delete_btn'].destroy()
+        try:
+            idx_to_remove = -1
+            for idx, row in enumerate(self.channel_rows):
+                if row['stt'] == row_num:
+                    idx_to_remove = idx
+                    break
             
-            self.channel_rows.pop(idx_to_remove)
-            
-            for new_idx, rem_row in enumerate(self.channel_rows):
-                new_row_num = new_idx + 1
-                rem_row['stt'] = new_row_num
-                rem_row['stt_label'].config(text=str(new_row_num))
+            if idx_to_remove != -1:
+                row = self.channel_rows[idx_to_remove]
+                try:
+                    row['stt_label'].destroy()
+                except Exception: pass
+                try:
+                    row['url_entry'].destroy()
+                except Exception: pass
+                try:
+                    row['folder_entry'].destroy()
+                except Exception: pass
+                try:
+                    row['status_label'].destroy()
+                except Exception: pass
+                try:
+                    row['delete_btn'].destroy()
+                except Exception: pass
                 
-                grid_row = new_row_num
-                rem_row['stt_label'].grid(row=grid_row, column=0)
-                rem_row['url_entry'].grid(row=grid_row, column=1)
-                rem_row['folder_entry'].grid(row=grid_row, column=2)
-                rem_row['status_label'].grid(row=grid_row, column=3)
-                rem_row['delete_btn'].grid(row=grid_row, column=4)
+                self.channel_rows.pop(idx_to_remove)
                 
-                rem_row['delete_btn'].config(command=lambda r=new_row_num: self.delete_channel_row(r))
-            
-            self.save_channels_to_file()
+                for new_idx, rem_row in enumerate(self.channel_rows):
+                    new_row_num = new_idx + 1
+                    rem_row['stt'] = new_row_num
+                    try:
+                        rem_row['stt_label'].config(text=str(new_row_num))
+                    except Exception: pass
+                    
+                    grid_row = new_row_num
+                    try:
+                        rem_row['stt_label'].grid(row=grid_row, column=0)
+                    except Exception: pass
+                    try:
+                        rem_row['url_entry'].grid(row=grid_row, column=1)
+                    except Exception: pass
+                    try:
+                        rem_row['folder_entry'].grid(row=grid_row, column=2)
+                    except Exception: pass
+                    try:
+                        rem_row['status_label'].grid(row=grid_row, column=3)
+                    except Exception: pass
+                    try:
+                        rem_row['delete_btn'].grid(row=grid_row, column=4)
+                    except Exception: pass
+                    
+                    try:
+                        rem_row['delete_btn'].config(command=lambda r=new_row_num: self.delete_channel_row(r))
+                    except Exception: pass
+                
+                self.save_channels_to_file()
+        except Exception as e:
+            self.log(f"Lỗi khi xóa dòng: {e}")
 
     def queue_save_channels(self):
         if hasattr(self, '_save_channels_timer') and self._save_channels_timer:
-            self.root.after_cancel(self._save_channels_timer)
-        self._save_channels_timer = self.root.after(500, self.save_channels_to_file)
+            try:
+                self.root.after_cancel(self._save_channels_timer)
+            except Exception:
+                pass
+        try:
+            self._save_channels_timer = self.root.after(500, self.save_channels_to_file)
+        except Exception:
+            pass
 
     def save_channels_to_file(self):
-        channels = []
-        for row in self.channel_rows:
-            url = row['url_entry'].get().strip()
-            folder = row['folder_entry'].get().strip()
-            if url:
-                channels.append({'url': url, 'name': folder})
-        
-        from youtube_manager import YouTubeManager
-        yt_manager = YouTubeManager()
-        
-        with yt_manager.lock:
-            with open(yt_manager.channels_file, 'w', encoding='utf-8') as f:
-                for ch in channels:
-                    if ch['name']:
-                        f.write(f"{ch['url']}|{ch['name']}\n")
-                    else:
-                        f.write(f"{ch['url']}\n")
+        try:
+            channels = []
+            for row in self.channel_rows:
+                try:
+                    url = row['url_var'].get().strip()
+                    folder = row['folder_var'].get().strip()
+                    if url:
+                        channels.append({'url': url, 'name': folder})
+                except Exception:
+                    continue
+            
+            from youtube_manager import YouTubeManager
+            yt_manager = YouTubeManager()
+            
+            with yt_manager.lock:
+                with open(yt_manager.channels_file, 'w', encoding='utf-8') as f:
+                    for ch in channels:
+                        if ch['name']:
+                            f.write(f"{ch['url']}|{ch['name']}\n")
+                        else:
+                            f.write(f"{ch['url']}\n")
+        except Exception as e:
+            self.log(f"Lỗi khi lưu danh sách kênh: {e}")
 
 class ProfileSelector(tk.Tk):
     def __init__(self):
