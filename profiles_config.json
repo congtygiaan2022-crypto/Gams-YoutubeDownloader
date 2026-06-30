@@ -1,0 +1,28 @@
+{
+    "profiles": [
+        {
+            "id": 1,
+            "name": "HIP"
+        },
+        {
+            "id": 2,
+            "name": "Profile 2"
+        },
+        {
+            "id": 3,
+            "name": "Profile 3"
+        },
+        {
+            "id": 4,
+            "name": "Profile 4"
+        },
+        {
+            "id": 5,
+            "name": "Profile 5"
+        },
+        {
+            "id": 6,
+            "name": "Profile 6"
+        }
+    ]
+}

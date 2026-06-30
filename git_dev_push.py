@@ -37,6 +37,8 @@ ALLOWED_FILES = [
     ".gitignore",
     "Day_Cap_Nhat_Git.bat",
     "git_dev_push.py",
+    "profiles_config.json",
+    "backups",
     
     # Client-side setup files inside AutoUpdate folder
     "AutoUpdate - Antigravity_Gams_Youtubedownload/Cai_Dat_Thu_Vien.bat",
