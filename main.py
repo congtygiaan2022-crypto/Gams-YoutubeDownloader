@@ -2,7 +2,58 @@ import logging
 import time
 import sys
 import os
+import json
 import config
+
+# Parse profile parameter (env or CLI args)
+profile_id = os.environ.get("PROFILE_ID")
+for i, arg in enumerate(sys.argv):
+    if arg == "--profile" and i + 1 < len(sys.argv):
+        profile_id = sys.argv[i + 1]
+
+if profile_id:
+    config.PROFILE_ID = profile_id
+    config.PROFILE_DIR = f"profiles/profile_{profile_id}"
+    
+    # Di chuyển dữ liệu cũ từ root vào Profile 1 nếu là lần đầu tiên chạy Profile 1
+    if (profile_id == 1 or profile_id == "1"):
+        config_json_path = os.path.join(config.PROFILE_DIR, "config.json")
+        if not os.path.exists(config_json_path) or os.path.getsize(config_json_path) == 0:
+            import shutil
+            os.makedirs(config.PROFILE_DIR, exist_ok=True)
+            old_files = [
+                "danhsachkenh.txt",
+                "lichsutai.txt",
+                "thongke_ngay.txt",
+                "channel_map.txt",
+                "cookies.txt",
+                "kenh_loi.txt",
+                "hangdoi.txt"
+            ]
+            for fname in old_files:
+                src = fname
+                dst = os.path.join(config.PROFILE_DIR, fname)
+                if os.path.exists(src) and os.path.isfile(src):
+                    try:
+                        shutil.copy2(src, dst)
+                    except:
+                        pass
+
+    # Load profile-specific config if it exists
+    config_json_path = os.path.join(config.PROFILE_DIR, "config.json")
+    if os.path.exists(config_json_path):
+        try:
+            with open(config_json_path, "r", encoding="utf-8") as f:
+                cfg_data = json.load(f)
+            for k, v in cfg_data.items():
+                setattr(config, k, v)
+        except Exception as e:
+            print(f"Warning: Lỗi load profile config: {e}")
+            
+    # Resolve relative COOKIES_FILE in profile dir
+    if config.COOKIES_FILE and not os.path.isabs(config.COOKIES_FILE):
+        config.COOKIES_FILE = os.path.join(config.PROFILE_DIR, config.COOKIES_FILE)
+
 from gemlogin_api import GemLoginAPI
 from gpm_login_api import GPMLoginAPI
 from browser import Browser
@@ -19,7 +70,12 @@ sys.stdout.reconfigure(encoding='utf-8')
 import datetime
 
 # Tạo thư mục logs nếu chưa có
-log_dir = "logs"
+profile_dir = getattr(config, 'PROFILE_DIR', None)
+if profile_dir:
+    log_dir = os.path.join(profile_dir, "logs")
+else:
+    log_dir = "logs"
+    
 if not os.path.exists(log_dir):
     os.makedirs(log_dir)
 
@@ -28,19 +84,26 @@ current_time = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
 session_log_file = os.path.join(log_dir, f"bot_session_{current_time}.log")
 
 # Cấu hình logging
+log_file_path = config.LOG_FILE
+if profile_dir:
+    log_file_path = os.path.join(profile_dir, config.LOG_FILE)
+
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
     handlers=[
         logging.FileHandler(session_log_file, encoding='utf-8'),
-        logging.FileHandler(config.LOG_FILE, encoding='utf-8'), # Giữ lại log tổng
+        logging.FileHandler(log_file_path, encoding='utf-8'), # Giữ lại log tổng
         logging.StreamHandler(sys.stdout)
     ]
 )
 logger = logging.getLogger(__name__)
 
 # Cơ chế Lock để ngăn chạy song song nhiều tiến trình main.py dùng chung profile
-LOCK_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bot_running.lock")
+if profile_dir:
+    LOCK_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), profile_dir, "bot_running.lock")
+else:
+    LOCK_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bot_running.lock")
 lock_file_pointer = None
 
 def is_pid_running_bot(pid):
@@ -67,6 +130,7 @@ def is_pid_running_bot(pid):
 def acquire_lock():
     global lock_file_pointer
     max_retries = 3
+    os.makedirs(os.path.dirname(LOCK_PATH), exist_ok=True)
     for attempt in range(max_retries):
         try:
             # Sử dụng os.open với O_CREAT và O_EXCL để đảm bảo tạo file nguyên tử (atomic) ở cấp độ OS
@@ -185,7 +249,7 @@ def is_channel_name_matching(scraped, expected, url=None):
     return False
 
 def scrape_channel(driver, channel_url, max_videos=10):
-    """Quét các video shorts mới nhất từ kênh. Trả về (video_links, channel_title)."""
+    """Quét các video mới nhất từ kênh (shorts hoặc video thường). Trả về (video_links, channel_title)."""
     try:
         logger.info(f"Đang quét kênh (Browser): {channel_url}")
         driver.get(channel_url)
@@ -248,6 +312,15 @@ def scrape_channel(driver, channel_url, max_videos=10):
         if "404 Not Found" in channel_title or "This page isn't available" in channel_title or "Trang này không khả dụng" in channel_title:
             return "404", channel_title
 
+        # Xác định chế độ video thường hay short dựa trên URL
+        is_shorts = "/shorts" in channel_url.lower()
+        is_videos = "/videos" in channel_url.lower()
+        if not is_shorts and not is_videos:
+            is_shorts = True # Mặc định cũ là shorts
+            
+        xpath_query = "//a[contains(@href, '/shorts/')]" if is_shorts else "//a[contains(@href, '/watch?v=')]"
+        type_str = "Short" if is_shorts else "thường"
+        
         # Logic cuộn trang để đảm bảo lấy đủ video
         video_links = []
         scroll_attempts = 0
@@ -258,13 +331,26 @@ def scrape_channel(driver, channel_url, max_videos=10):
             driver.execute_script("window.scrollBy(0, 1000);")
             time.sleep(2)
             
-            elements = driver.find_elements(By.XPATH, "//a[contains(@href, '/shorts/')]")
+            elements = driver.find_elements(By.XPATH, xpath_query)
             
             for el in elements:
                 href = el.get_attribute('href')
-                if href and '/shorts/' in href:
-                    if href not in video_links and href != "https://www.youtube.com/shorts/" and href != "https://www.youtube.com/shorts":
-                        video_links.append(href)
+                if not href:
+                    continue
+                if is_shorts:
+                    if '/shorts/' in href:
+                        video_id = href.split('/shorts/')[1].split('?')[0].split('&')[0].split('#')[0].strip('/')
+                        if video_id:
+                            clean_href = f"https://www.youtube.com/shorts/{video_id}"
+                            if clean_href not in video_links:
+                                video_links.append(clean_href)
+                else:
+                    if '/watch?v=' in href:
+                        video_id = href.split('v=')[1].split('&')[0].split('#')[0]
+                        if video_id:
+                            clean_href = f"https://www.youtube.com/watch?v={video_id}"
+                            if clean_href not in video_links:
+                                video_links.append(clean_href)
             
             # Nếu đã đủ thi dừng
             if len(video_links) >= max_videos:
@@ -273,7 +359,7 @@ def scrape_channel(driver, channel_url, max_videos=10):
             scroll_attempts += 1
             
         if not video_links:
-            logger.warning(f"Không tìm thấy video Short nào trên kênh {channel_url}. Có thể kênh không có Short hoặc giao diện thay đổi.")
+            logger.warning(f"Không tìm thấy video {type_str} nào trên kênh {channel_url}. Có thể kênh không có video {type_str} hoặc giao diện thay đổi.")
             
         return video_links[:max_videos], channel_title
 
@@ -284,7 +370,7 @@ def scrape_channel(driver, channel_url, max_videos=10):
         return [], "unknown_channel"
 
 def scrape_channel_api(yt_manager, channel_url, api_key, max_videos=10):
-    """Quét video từ kênh bằng YouTube Data API v3."""
+    """Quét video từ kênh bằng YouTube Data API v3 (shorts hoặc video thường)."""
     try:
         from googleapiclient.discovery import build
         import logging
@@ -343,24 +429,24 @@ def scrape_channel_api(yt_manager, channel_url, api_key, max_videos=10):
         uploads_playlist_id = channel_info['contentDetails']['relatedPlaylists']['uploads']
         
         # 3. Lấy video mới nhất từ playlist uploads
-        # Lưu ý: API search list có thể lọc shorts tốt hơn nếu dùng type=video và q=shorts
-        # Nhưng uploads playlist là chính xác nhất cho video mới.
-        # Ta sẽ lấy 50 video mới nhất và lọc lấy shorts (giả định shorts có từ khóa shorts hoặc độ dài ngắn)
-        # Tuy nhiên, YouTube Shorts link chuẩn nhất là https://www.youtube.com/shorts/VIDEO_ID
-        
         playlist_response = youtube.playlistItems().list(
             playlistId=uploads_playlist_id,
             part='snippet,contentDetails',
             maxResults=50
         ).execute()
         
+        is_shorts = "/shorts" in channel_url.lower()
+        is_videos = "/videos" in channel_url.lower()
+        if not is_shorts and not is_videos:
+            is_shorts = True # Mặc định cũ là shorts
+            
         video_links = []
         for item in playlist_response.get('items', []):
             video_id = item['contentDetails']['videoId']
-            # Kiểm tra xem có phải shorts không. 
-            # API không có flag 'is_shorts', nhưng ta có thể check video categories hoặc duration.
-            # Đơn giản nhất là trả về dạng shorts link.
-            video_url = f"https://www.youtube.com/shorts/{video_id}"
+            if is_shorts:
+                video_url = f"https://www.youtube.com/shorts/{video_id}"
+            else:
+                video_url = f"https://www.youtube.com/watch?v={video_id}"
             video_links.append(video_url)
             if len(video_links) >= max_videos:
                 break
@@ -474,7 +560,11 @@ def main():
             
             # Ghi nhận profile đang chạy để GiaanTesttool có thể dọn dẹp an toàn
             try:
-                with open("active_profiles.tmp", "a") as tmp:
+                tmp_path = "active_profiles.tmp"
+                profile_dir = getattr(config, 'PROFILE_DIR', None)
+                if profile_dir:
+                    tmp_path = os.path.join(profile_dir, tmp_path)
+                with open(tmp_path, "a") as tmp:
                     tmp.write(f"{p_id}\n")
             except:
                 pass
@@ -551,11 +641,18 @@ def main():
                                 else:
                                      safe_title = sanitize_filename(scraped_title)
                                      if safe_title and safe_title != "unknown_channel":
-                                         final_name = safe_title
+                                         is_videos = "/videos" in channel_url.lower()
+                                         suffix = " videos" if is_videos else " short"
+                                         
+                                         if not safe_title.endswith(suffix):
+                                             final_name = f"{safe_title}{suffix}"
+                                         else:
+                                             final_name = safe_title
                                          # Lưu lại tên (Chỉ khi chưa có)
                                          yt_manager.update_channel_name(channel_url, final_name)
                                      else:
-                                         final_name = "unknown_channel_short"
+                                         is_videos = "/videos" in channel_url.lower()
+                                         final_name = "unknown_channel_videos" if is_videos else "unknown_channel_short"
                                 if final_name not in final_names:
                                     final_names.append(final_name)
 

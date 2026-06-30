@@ -20,6 +20,10 @@ class Downloader:
         else:
             self.download_dir = 'downloads'
 
+        profile_dir = getattr(config, 'PROFILE_DIR', None)
+        if profile_dir and not os.path.isabs(self.download_dir):
+            self.download_dir = os.path.join(profile_dir, self.download_dir)
+
         self.logger = logging.getLogger(__name__)
         self.last_error = None
         

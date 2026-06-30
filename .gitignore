@@ -24,3 +24,7 @@ VideoDownloader/
 *.zip
 *.rar
 *active_profiles.tmp
+
+# Cho phép Git theo dõi thư mục backups và các file sao lưu bên trong
+!backups/
+!backups/*

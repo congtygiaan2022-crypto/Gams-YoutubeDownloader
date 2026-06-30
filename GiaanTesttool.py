@@ -7,6 +7,7 @@ import threading
 import time
 import config
 import re
+import json
 
 # Fix DPI
 try:
@@ -108,7 +109,8 @@ class GiaanTool:
         h_frame.grid_columnconfigure(1, weight=0)
         h_frame.grid_columnconfigure(2, weight=1)
 
-        self.header_label = tk.Label(h_frame, text="Antigravity Gams Download", font=("Segoe UI", 16, "bold"), fg="#4CAF50")
+        profile_name = getattr(config, 'PROFILE_NAME', 'Mặc định')
+        self.header_label = tk.Label(h_frame, text=f"Antigravity Gams Download - Profile: {profile_name}", font=("Segoe UI", 16, "bold"), fg="#4CAF50")
         self.header_label.grid(row=0, column=1)
         
         # Theme Button (Right aligned)
@@ -452,6 +454,12 @@ class GiaanTool:
 
         btn_view_stats = tk.Button(frame, text="📊 Kiểm tra Video & Log", bg="#4CAF50", fg="white", relief="flat", command=self.show_stats_tab, font=("Segoe UI", 9, "bold"))
         btn_view_stats.pack(fill="x", pady=4)
+        
+        btn_backup = tk.Button(frame, text="💾 Sao Lưu Profile", bg="#2196F3", fg="white", relief="flat", command=self.backup_current_profile_ui, font=("Segoe UI", 9, "bold"))
+        btn_backup.pack(fill="x", pady=4)
+        
+        btn_restore = tk.Button(frame, text="📥 Khôi Phục Profile", bg="#FF9800", fg="white", relief="flat", command=self.restore_current_profile_ui, font=("Segoe UI", 9, "bold"))
+        btn_restore.pack(fill="x", pady=4)
 
     def show_stats_tab(self):
         """Chuyển sang tab Thống kê và làm mới dữ liệu."""
@@ -461,7 +469,14 @@ class GiaanTool:
     def open_file(self, filename):
         try:
             # Resolve relative path
-            full_path = os.path.join(self.base_dir, filename)
+            profile_dir = getattr(config, 'PROFILE_DIR', None)
+            if profile_dir:
+                full_path = os.path.join(self.base_dir, profile_dir, filename)
+            else:
+                full_path = os.path.join(self.base_dir, filename)
+            
+            # Ensure folder exists
+            os.makedirs(os.path.dirname(full_path), exist_ok=True)
             
             if not os.path.exists(full_path):
                  # Create if not exists so it opens blank
@@ -469,6 +484,178 @@ class GiaanTool:
             os.startfile(full_path)
         except Exception as e:
             messagebox.showerror("Lỗi", str(e))
+
+    def backup_current_profile_ui(self):
+        import zipfile
+        import json
+        from datetime import datetime
+        
+        profile_id = getattr(config, 'PROFILE_ID', None)
+        profile_name = getattr(config, 'PROFILE_NAME', 'Mặc định')
+        profile_dir = getattr(config, 'PROFILE_DIR', None)
+        
+        if not profile_id or not profile_dir:
+            messagebox.showwarning("Cảnh báo", "Không tìm thấy profile hoạt động để sao lưu.")
+            return
+            
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        safe_profile_name = "".join(c for c in profile_name if c.isalnum() or c in (' ', '_', '-')).strip().replace(' ', '_')
+        default_filename = f"backup_{safe_profile_name}_{timestamp}.zip"
+        
+        backup_dir = os.path.join(self.base_dir, "backups")
+        os.makedirs(backup_dir, exist_ok=True)
+        
+        file_path = filedialog.asksaveasfilename(
+            title="Chọn nơi lưu bản sao lưu",
+            initialdir=backup_dir,
+            initialfile=default_filename,
+            filetypes=[("ZIP files", "*.zip")],
+            defaultextension=".zip"
+        )
+        
+        if not file_path:
+            return
+            
+        try:
+            full_profile_dir = os.path.join(self.base_dir, profile_dir)
+            files_to_backup = [
+                "config.json",
+                "danhsachkenh.txt",
+                "lichsutai.txt",
+                "hangdoi.txt",
+                "thongke_ngay.txt",
+                "channel_map.txt",
+                "cookies.txt",
+                "kenh_loi.txt"
+            ]
+            
+            with zipfile.ZipFile(file_path, 'w', zipfile.ZIP_DEFLATED) as zip_ref:
+                # Add files
+                for fname in files_to_backup:
+                    fpath = os.path.join(full_profile_dir, fname)
+                    if os.path.exists(fpath):
+                        zip_ref.write(fpath, fname)
+                
+                # Add metadata
+                metadata = {
+                    "profile_id": profile_id,
+                    "profile_name": profile_name,
+                    "backup_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    "tool": "Gams Youtube Downloader"
+                }
+                zip_ref.writestr("metadata.json", json.dumps(metadata, indent=4, ensure_ascii=False))
+                
+            self.log(f"Đã sao lưu Profile '{profile_name}' thành công vào: {file_path}")
+            messagebox.showinfo("Thành công", f"Đã sao lưu dữ liệu Profile '{profile_name}' thành công!")
+        except Exception as e:
+            self.log(f"Lỗi sao lưu: {e}")
+            messagebox.showerror("Lỗi", f"Không thể sao lưu dữ liệu: {e}")
+
+    def restore_current_profile_ui(self):
+        import zipfile
+        import json
+        
+        profile_id = getattr(config, 'PROFILE_ID', None)
+        profile_name = getattr(config, 'PROFILE_NAME', 'Mặc định')
+        profile_dir = getattr(config, 'PROFILE_DIR', None)
+        
+        if not profile_id or not profile_dir:
+            messagebox.showwarning("Cảnh báo", "Không tìm thấy profile hoạt động để khôi phục.")
+            return
+            
+        backup_dir = os.path.join(self.base_dir, "backups")
+        file_path = filedialog.askopenfilename(
+            title="Chọn tệp sao lưu để khôi phục (.zip)",
+            initialdir=backup_dir,
+            filetypes=[("ZIP files", "*.zip")]
+        )
+        
+        if not file_path:
+            return
+            
+        try:
+            with zipfile.ZipFile(file_path, 'r') as zip_ref:
+                file_list = zip_ref.namelist()
+                if "config.json" not in file_list:
+                    messagebox.showerror("Lỗi", "Tệp sao lưu không hợp lệ (Không tìm thấy config.json).")
+                    return
+                    
+                meta_info = ""
+                if "metadata.json" in file_list:
+                    try:
+                        metadata = json.loads(zip_ref.read("metadata.json").decode('utf-8'))
+                        meta_info = f"\n- Profile gốc: {metadata.get('profile_name')}\n- Thời gian sao lưu: {metadata.get('backup_time')}"
+                    except:
+                        pass
+                
+                confirm = messagebox.askyesno(
+                    "Xác nhận khôi phục",
+                    f"Bạn có chắc chắn muốn khôi phục dữ liệu từ tệp sao lưu này?{meta_info}\n\n⚠️ HÀNH ĐỘNG NÀY SẼ GHI ĐÈ TOÀN BỘ cấu hình và dữ liệu hiện tại của Profile '{profile_name}'!"
+                )
+                
+                if not confirm:
+                    return
+                    
+                full_profile_dir = os.path.join(self.base_dir, profile_dir)
+                os.makedirs(full_profile_dir, exist_ok=True)
+                
+                # Extract and overwrite files
+                for member in file_list:
+                    if member == "metadata.json":
+                        continue
+                    # Read content and write to profile dir
+                    target_path = os.path.join(full_profile_dir, member)
+                    # Verify target_path is inside full_profile_dir (avoid directory traversal vulnerability)
+                    real_target = os.path.abspath(target_path)
+                    real_base = os.path.abspath(full_profile_dir)
+                    if real_target.startswith(real_base):
+                        with open(target_path, 'wb') as f:
+                            f.write(zip_ref.read(member))
+                            
+            self.log(f"Đã khôi phục Profile '{profile_name}' thành công từ: {file_path}")
+            
+            # Reload configuration from the restored config.json
+            profile_config_path = os.path.join(full_profile_dir, "config.json")
+            if os.path.exists(profile_config_path):
+                try:
+                    with open(profile_config_path, "r", encoding="utf-8") as f:
+                        cfg_data = json.load(f)
+                    for k, v in cfg_data.items():
+                        setattr(config, k, v)
+                except Exception as e:
+                    self.log(f"Lỗi load lại config: {e}")
+            
+            # Resolve path cookies cho profile
+            if config.COOKIES_FILE and not os.path.isabs(config.COOKIES_FILE):
+                config.COOKIES_FILE = os.path.join(config.PROFILE_DIR, config.COOKIES_FILE)
+            
+            # Update GUI variables to match the restored config
+            self.run_once.set(getattr(config, 'RUN_ONCE', True))
+            self.loop_count.set(getattr(config, 'LOOP_COUNT', 5))
+            self.loop_delay.set(getattr(config, 'LOOP_DELAY', 60))
+            self.download_threads.set(getattr(config, 'DOWNLOAD_THREADS', 3))
+            self.check_threads.set(getattr(config, 'CHECK_THREADS', 1))
+            self.download_path.set(getattr(config, 'DOWNLOAD_PATH', 'downloads'))
+            self.use_api_scan.set(getattr(config, 'USE_API_SCAN', False))
+            self.use_browser_scan.set(getattr(config, 'USE_BROWSER_SCAN', True))
+            self.youtube_api_key.set(getattr(config, 'YOUTUBE_API_KEY', ''))
+            self.cookies_from_browser.set(getattr(config, 'COOKIES_FROM_BROWSER', ''))
+            self.cookies_file.set(getattr(config, 'COOKIES_FILE', 'cookies.txt'))
+            self.browser_type.set(getattr(config, 'BROWSER_TYPE', 'gemlogin'))
+            self.gemlogin_api_url.set(getattr(config, 'GEMLOGIN_API_URL', 'http://localhost:1010'))
+            self.gpmlogin_api_url.set(getattr(config, 'GPM_LOGIN_API_URL', 'http://localhost:60064'))
+            self.selected_profile_id.set(getattr(config, 'SELECTED_PROFILE_ID', 'None'))
+            self.selected_profile_name.set(getattr(config, 'SELECTED_PROFILE_NAME', 'None'))
+            
+            # Reload UI panels
+            self.refresh_stats()
+            self.refresh_error_channels()
+            self.refresh_channels_tab()
+            
+            messagebox.showinfo("Thành công", f"Đã khôi phục dữ liệu Profile '{profile_name}' thành công!")
+        except Exception as e:
+            self.log(f"Lỗi khôi phục: {e}")
+            messagebox.showerror("Lỗi", f"Không thể khôi phục dữ liệu: {e}")
 
     def open_download_folder(self):
         try:
@@ -684,6 +871,44 @@ class GiaanTool:
 
     def save_config(self):
         try:
+            profile_id = getattr(config, 'PROFILE_ID', None)
+            if profile_id:
+                # Save to JSON
+                profile_dir = getattr(config, 'PROFILE_DIR', None)
+                json_path = os.path.join(profile_dir, "config.json")
+                
+                # Build dict from variables
+                cfg_data = {
+                    "BROWSER_TYPE": self.browser_type.get(),
+                    "GEMLOGIN_API_URL": self.gemlogin_api_url.get(),
+                    "GPM_LOGIN_API_URL": self.gpmlogin_api_url.get(),
+                    "DOWNLOAD_THREADS": self.download_threads.get(),
+                    "CHECK_THREADS": self.check_threads.get(),
+                    "RUN_ONCE": self.run_once.get(),
+                    "LOOP_COUNT": self.loop_count.get(),
+                    "LOOP_DELAY": self.loop_delay.get(),
+                    "USE_API_SCAN": self.use_api_scan.get(),
+                    "USE_BROWSER_SCAN": self.use_browser_scan.get(),
+                    "YOUTUBE_API_KEY": self.youtube_api_key.get(),
+                    "DOWNLOAD_PATH": self.download_path.get(),
+                    "COOKIES_FROM_BROWSER": self.cookies_from_browser.get(),
+                    "COOKIES_FILE": self.cookies_file.get(),
+                    "SELECTED_PROFILE_ID": self.selected_profile_id.get(),
+                    "SELECTED_PROFILE_NAME": self.selected_profile_name.get(),
+                    "HEADLESS_LOCAL_CHROME": getattr(config, 'HEADLESS_LOCAL_CHROME', False)
+                }
+                
+                # Overwrite config module properties dynamically in memory
+                for k, v in cfg_data.items():
+                    setattr(config, k, v)
+                
+                with open(json_path, "w", encoding="utf-8") as f:
+                    json.dump(cfg_data, f, indent=4, ensure_ascii=False)
+                
+                self.log("Đã lưu cấu hình profile thành công!")
+                messagebox.showinfo("Thành công", "Đã lưu cấu hình profile mới!")
+                return
+            
             # Read config file
             config_path = os.path.join(self.base_dir, "config.py")
             with open(config_path, "r", encoding="utf-8") as f:
@@ -787,8 +1012,14 @@ class GiaanTool:
                 env = os.environ.copy()
                 env["PYTHONIOENCODING"] = "utf-8"
                 
+                args = ["python", "-u", main_script]
+                profile_id = getattr(config, 'PROFILE_ID', None)
+                if profile_id:
+                    args.extend(["--profile", str(profile_id)])
+                    env["PROFILE_ID"] = str(profile_id)
+                
                 self.current_process = subprocess.Popen(
-                    ["python", "-u", main_script], # -u for unbuffered output
+                    args,
                     cwd=self.base_dir, 
                     stdout=subprocess.PIPE, 
                     stderr=subprocess.STDOUT, # Merge stderr into stdout to prevent deadlock
@@ -917,7 +1148,11 @@ class GiaanTool:
             else:
                 api = GemLoginAPI()
             
-            tmp_file = os.path.join(self.base_dir, "active_profiles.tmp")
+            profile_dir = getattr(config, 'PROFILE_DIR', None)
+            if profile_dir:
+                tmp_file = os.path.join(self.base_dir, profile_dir, "active_profiles.tmp")
+            else:
+                tmp_file = os.path.join(self.base_dir, "active_profiles.tmp")
             if os.path.exists(tmp_file):
                 with open(tmp_file, "r") as f:
                     profile_ids = set(line.strip() for line in f if line.strip())
@@ -1250,7 +1485,196 @@ class GiaanTool:
                     else:
                         f.write(f"{ch['url']}\n")
 
+class ProfileSelector(tk.Tk):
+    def __init__(self):
+        super().__init__()
+        self.title("Chọn Profile Hoạt Động")
+        self.geometry("520x450")
+        self.resizable(False, False)
+        self.configure(bg="#1e1e2e")
+        
+        # Load or create config
+        self.config_path = "profiles_config.json"
+        self.load_config()
+        
+        # Design Title
+        lbl_title = tk.Label(self, text="HỆ THỐNG QUẢN LÝ PROFILE", font=("Arial", 16, "bold"), bg="#1e1e2e", fg="#4CAF50")
+        lbl_title.pack(pady=20)
+        
+        lbl_desc = tk.Label(self, text="Vui lòng chọn Profile để truy cập Dashboard riêng biệt:", font=("Arial", 10), bg="#1e1e2e", fg="#a6adc8")
+        lbl_desc.pack(pady=(0, 20))
+        
+        # Grid frame
+        grid_frame = tk.Frame(self, bg="#1e1e2e")
+        grid_frame.pack(fill="both", expand=True, padx=40)
+        
+        self.buttons = []
+        for i, prof in enumerate(self.profiles):
+            row = i // 2
+            col = i % 2
+            
+            # Subframe for button + edit button
+            item_frame = tk.Frame(grid_frame, bg="#1e1e2e", pady=8, padx=8)
+            item_frame.grid(row=row, column=col, sticky="nsew")
+            
+            # Select button
+            btn_select = tk.Button(
+                item_frame, text=prof['name'], font=("Arial", 11, "bold"),
+                bg="#313244", fg="#cdd6f4", activebackground="#45475a", activeforeground="#4CAF50",
+                bd=0, height=2, width=15, cursor="hand2",
+                command=lambda p=prof: self.select_profile(p)
+            )
+            btn_select.pack(side="left", fill="x", expand=True)
+            self.buttons.append((btn_select, prof))
+            
+            # Edit name button
+            btn_edit = tk.Button(
+                item_frame, text="✏️", font=("Arial", 10),
+                bg="#1e1e2e", fg="#fab387", activebackground="#1e1e2e", activeforeground="#f38ba8",
+                bd=0, cursor="hand2", padx=5,
+                command=lambda idx=i: self.edit_profile_name(idx)
+            )
+            btn_edit.pack(side="right", padx=(5, 0))
+            
+        # Set grid weight
+        for r in range(3):
+            grid_frame.rowconfigure(r, weight=1)
+        for c in range(2):
+            grid_frame.columnconfigure(c, weight=1)
+            
+        self.selected_profile = None
+
+    def load_config(self):
+        if os.path.exists(self.config_path):
+            try:
+                with open(self.config_path, "r", encoding="utf-8") as f:
+                    self.config_data = json.load(f)
+            except:
+                self.config_data = self.get_default_config()
+        else:
+            self.config_data = self.get_default_config()
+            self.save_config()
+            
+        self.profiles = self.config_data.get("profiles", [])
+
+    def get_default_config(self):
+        return {
+            "profiles": [
+                {"id": 1, "name": "Profile 1"},
+                {"id": 2, "name": "Profile 2"},
+                {"id": 3, "name": "Profile 3"},
+                {"id": 4, "name": "Profile 4"},
+                {"id": 5, "name": "Profile 5"},
+                {"id": 6, "name": "Profile 6"}
+            ]
+        }
+
+    def save_config(self):
+        try:
+            with open(self.config_path, "w", encoding="utf-8") as f:
+                json.dump(self.config_data, f, indent=4, ensure_ascii=False)
+        except Exception as e:
+            print(f"Error saving profiles config: {e}")
+
+    def edit_profile_name(self, idx):
+        current_name = self.profiles[idx]['name']
+        new_name = simpledialog.askstring("Đổi tên Profile", f"Nhập tên mới cho {current_name}:", parent=self)
+        if new_name and new_name.strip():
+            self.profiles[idx]['name'] = new_name.strip()
+            self.config_data['profiles'] = self.profiles
+            self.save_config()
+            self.buttons[idx][0].configure(text=new_name.strip())
+
+    def select_profile(self, profile):
+        self.selected_profile = profile
+        self.destroy()
+
 if __name__ == "__main__":
-    root = tk.Tk()
-    app = GiaanTool(root)
-    root.mainloop()
+    from tkinter import simpledialog
+    
+    # 1. Khởi chạy ProfileSelector
+    selector = ProfileSelector()
+    selector.mainloop()
+    
+    if selector.selected_profile:
+        prof = selector.selected_profile
+        profile_id = prof['id']
+        profile_name = prof['name']
+        
+        # Ghi nhận config cho GiaanTool
+        import config
+        config.PROFILE_ID = profile_id
+        config.PROFILE_NAME = profile_name
+        config.PROFILE_DIR = f"profiles/profile_{profile_id}"
+        
+        # Tạo thư mục lưu profile
+        os.makedirs(config.PROFILE_DIR, exist_ok=True)
+        
+        # Di chuyển dữ liệu cũ từ root vào Profile 1 nếu là lần đầu tiên chạy Profile 1
+        profile_config_path = os.path.join(config.PROFILE_DIR, "config.json")
+        if (profile_id == 1 or profile_id == "1") and (not os.path.exists(profile_config_path) or os.path.getsize(profile_config_path) == 0):
+            import shutil
+            old_files = [
+                "danhsachkenh.txt",
+                "lichsutai.txt",
+                "thongke_ngay.txt",
+                "channel_map.txt",
+                "cookies.txt",
+                "kenh_loi.txt",
+                "hangdoi.txt"
+            ]
+            for fname in old_files:
+                src = os.path.join(os.path.dirname(os.path.abspath(__file__)), fname)
+                dst = os.path.join(config.PROFILE_DIR, fname)
+                if os.path.exists(src) and os.path.isfile(src):
+                    try:
+                        shutil.copy2(src, dst)
+                    except Exception as e:
+                        print(f"Error migrating {fname}: {e}")
+        
+        # Load hoặc copy cấu hình mặc định vào profiles/profile_{id}/config.json
+        cfg_loaded = False
+        if os.path.exists(profile_config_path) and os.path.getsize(profile_config_path) > 0:
+            try:
+                with open(profile_config_path, "r", encoding="utf-8") as f:
+                    cfg_data = json.load(f)
+                for k, v in cfg_data.items():
+                    setattr(config, k, v)
+                cfg_loaded = True
+            except Exception as e:
+                print(f"Warning: Lỗi load profile config: {e}")
+                
+        if not cfg_loaded:
+            default_cfg = {
+                "BROWSER_TYPE": config.BROWSER_TYPE,
+                "GEMLOGIN_API_URL": config.GEMLOGIN_API_URL,
+                "GPM_LOGIN_API_URL": config.GPM_LOGIN_API_URL,
+                "DOWNLOAD_THREADS": config.DOWNLOAD_THREADS,
+                "CHECK_THREADS": config.CHECK_THREADS,
+                "RUN_ONCE": config.RUN_ONCE,
+                "LOOP_COUNT": config.LOOP_COUNT,
+                "LOOP_DELAY": config.LOOP_DELAY,
+                "USE_API_SCAN": config.USE_API_SCAN,
+                "USE_BROWSER_SCAN": config.USE_BROWSER_SCAN,
+                "YOUTUBE_API_KEY": config.YOUTUBE_API_KEY,
+                "DOWNLOAD_PATH": config.DOWNLOAD_PATH,
+                "COOKIES_FROM_BROWSER": config.COOKIES_FROM_BROWSER,
+                "COOKIES_FILE": config.COOKIES_FILE,
+                "SELECTED_PROFILE_ID": config.SELECTED_PROFILE_ID,
+                "SELECTED_PROFILE_NAME": config.SELECTED_PROFILE_NAME,
+                "HEADLESS_LOCAL_CHROME": getattr(config, 'HEADLESS_LOCAL_CHROME', False)
+            }
+            try:
+                with open(profile_config_path, "w", encoding="utf-8") as f:
+                    json.dump(default_cfg, f, indent=4, ensure_ascii=False)
+            except Exception as e:
+                print(f"Warning: Lỗi ghi profile config: {e}")
+                
+        # Resolve path cookies cho profile
+        if config.COOKIES_FILE and not os.path.isabs(config.COOKIES_FILE):
+            config.COOKIES_FILE = os.path.join(config.PROFILE_DIR, config.COOKIES_FILE)
+            
+        # Khởi chạy main app window
+        root = tk.Tk()
+        app = GiaanTool(root)
+        root.mainloop()

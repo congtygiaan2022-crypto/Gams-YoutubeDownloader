@@ -17,12 +17,7 @@ class YouTubeManager:
         
         self.logger = logging.getLogger(__name__)
         self.lock = threading.Lock() # Lock cho safe-thread
-
-    def _resolve_path(self, path):
-        if not os.path.isabs(path):
-            return os.path.join(self.base_dir, path)
-        return path
-
+        
         # Đảm bảo các file tồn tại
         # (Dùng lock ở đây không quá cần thiết vì init chạy 1 lần, nhưng an toàn hơn)
         with self.lock:
@@ -30,6 +25,16 @@ class YouTubeManager:
                 if not os.path.exists(f):
                     with open(f, 'w', encoding='utf-8') as file:
                         pass
+
+    def _resolve_path(self, path):
+        if not os.path.isabs(path):
+            import config
+            profile_dir = getattr(config, 'PROFILE_DIR', None)
+            if profile_dir:
+                os.makedirs(os.path.join(self.base_dir, profile_dir), exist_ok=True)
+                return os.path.join(self.base_dir, profile_dir, path)
+            return os.path.join(self.base_dir, path)
+        return path
 
     def get_channels(self):
         """Đọc danh sách kênh từ file. Trả về list {'url': url, 'names': [name1, name2, ...]}."""
